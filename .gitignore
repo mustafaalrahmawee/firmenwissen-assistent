@@ -7,3 +7,10 @@ Thumbs.db
 
 # Lokale Umgebungsdateien (Projekte haben eigene .gitignore)
 .env
+
+# Review-Schleife (Austausch mit dem Reviewer, wird nach jedem Schritt gelöscht)
+.review/
+
+# Claude Code (Projektregeln und Skills nur lokal)
+CLAUDE.md
+.claude/
