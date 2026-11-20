@@ -1,0 +1,109 @@
+name: firmenwissen-assistent
+
+services:
+  mysql:
+    image: mysql:8.4.13
+    environment:
+      MYSQL_DATABASE: app
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app
+      MYSQL_ROOT_PASSWORD: root
+    ports: ["127.0.0.1:3307:3306"]
+    volumes:
+      - mysqldata:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      retries: 10
+
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.40.6
+    environment: &weaviate-env
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      ENABLE_MODULES: reranker-transformers
+      RERANKER_INFERENCE_API: http://reranker:8080
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"   # nur lokal
+      CLUSTER_HOSTNAME: node1
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: [weaviatedata:/var/lib/weaviate]
+    depends_on: [reranker]
+    healthcheck: &weaviate-health
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 5s
+      retries: 20
+
+  # Für Pest-Tests: ohne Volume, startet jedes Mal leer
+  weaviate-test:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.40.6
+    environment: *weaviate-env
+    ports: ["127.0.0.1:8081:8080"]
+    depends_on: [reranker]
+    healthcheck: *weaviate-health
+
+  # Mehrsprachiger Cross-Encoder (auch für deutsche Dokumente)
+  reranker:
+    image: cr.weaviate.io/semitechnologies/reranker-transformers:baai-bge-reranker-v2-m3-1.1.2
+    environment:
+      ENABLE_CUDA: "0"
+
+  ollama:
+    image: ollama/ollama:0.40.16
+    ports: ["127.0.0.1:11434:11434"]
+    volumes: [ollamadata:/root/.ollama]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      retries: 20
+
+  ollama-init:
+    image: ollama/ollama:0.40.16
+    entrypoint: ["ollama", "pull", "bge-m3"]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      ollama: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    build: ./docker/api     # FrankenPHP, Code kommt per Volume aus ./api
+    image: firmenwissen-assistent/api
+    volumes: [./api:/app]
+    ports: ["127.0.0.1:8000:8000"]
+    environment: &api-env
+      # Überschreibt api/.env (dort stehen die Werte für Artisan auf dem Host)
+      DB_HOST: mysql
+      DB_PORT: "3306"
+    healthcheck:            # ersetzt den Image-Check (Port 2019 gibt es bei php-server nicht)
+      test: ["CMD", "curl", "-fs", "http://localhost:8000/up"]
+      interval: 10s
+      retries: 5
+    depends_on:
+      mysql: { condition: service_healthy }
+      weaviate: { condition: service_healthy }
+      ollama: { condition: service_healthy }
+
+  worker:
+    image: firmenwissen-assistent/api
+    command: php artisan queue:work --tries=3
+    volumes: [./api:/app]
+    environment: *api-env
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    depends_on: [api]
+
+  app:
+    image: node:24.22.3-bookworm-slim
+    user: node              # UID 1000 wie auf dem Host
+    working_dir: /app
+    command: npm run dev -- --host 0.0.0.0
+    volumes: [./app:/app]
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [api]
+
+volumes:
+  mysqldata:
+  weaviatedata:
+  ollamadata:

@@ -1,0 +1,41 @@
+/* Schrift und Feinschliff wie in job-match (Inter, glatte Kanten, ruhige Buttons) */
+:root {
+  --v-font-body: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', sans-serif;
+}
+
+/* Vuetify 4 setzt Überschriften und Absätze nicht zurück. In der Reset-Ebene,
+   damit Vuetify-Klassen wie text-title-large weiterhin gewinnen. */
+@layer vuetify-core.reset {
+  h1, h2, h3, h4, h5, h6, p {
+    margin: 0;
+    font-size: inherit;
+    font-weight: inherit;
+  }
+}
+
+/* Inter braucht keine zusätzliche Laufweite (Material-Typografie setzt sie) */
+[class*='text-body-'],
+[class*='text-title-'],
+[class*='text-label-'],
+[class*='text-headline-'] {
+  letter-spacing: normal;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.v-btn {
+  letter-spacing: normal;
+  font-weight: 500;
+}
+
+.tracking-tight {
+  letter-spacing: -0.025em !important;
+}
+
+.text-muted {
+  color: rgb(var(--v-theme-muted-foreground)) !important;
+}

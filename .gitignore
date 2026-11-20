@@ -1,0 +1,9 @@
+# Windows-Metadaten beim Kopieren aus Windows
+*:Zone.Identifier
+
+# System und Editor
+.DS_Store
+Thumbs.db
+
+# Lokale Umgebungsdateien (Projekte haben eigene .gitignore)
+.env
