@@ -102,10 +102,10 @@ knowledge-rag/
 ├── web/                  # Nuxt
 ├── docker/               # Dockerfiles, Init-Skripte
 ├── docs/
-│   └── anchor/           # Anchor-Dokumente (rag, mcp, ...)
+│   ├── anchor/           # Anchor-Dokumente (rag, mcp, ...)
+│   └── PROJEKT.md
 ├── eval/                 # Testfragen und Auswertungsskript
 ├── docker-compose.yml
-├── PROJEKT.md
 └── README.md
 ```
 

@@ -2,7 +2,6 @@
 <template>
   <!-- Ein Wurzelelement (nicht <slot />), damit Nuxt Layout-Wechsel animieren kann -->
   <v-app>
-    <!-- Seitenleiste wie in job-match: Logo, Navigation, Nutzer mit Abmelden unten -->
     <v-navigation-drawer v-model="drawer" color="sidebar" width="256">
       <v-sheet height="56" color="transparent" class="d-flex align-center justify-space-between px-4">
         <div class="d-flex align-center ga-2">

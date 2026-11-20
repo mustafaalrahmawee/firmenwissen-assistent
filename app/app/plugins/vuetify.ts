@@ -3,8 +3,6 @@ import { createVuetify, type ThemeDefinition } from 'vuetify'
 import { aliases, mdi } from 'vuetify/iconsets/mdi-svg'
 import { de } from 'vuetify/locale'
 
-// Farben aus job-match (oklch nach Hex umgerechnet): neutrale Grautöne,
-// fast schwarze Primärfarbe, Indigo als Markenfarbe.
 const light: ThemeDefinition = {
   dark: false,
   colors: {
@@ -81,7 +79,6 @@ export default defineNuxtPlugin((nuxtApp) => {
       defaultTheme: savedTheme === 'dark' ? 'dark' : 'light',
       themes: { light, dark },
     },
-    // Flacher, ruhiger Stil wie in job-match
     defaults: {
       VBtn: { variant: 'flat', rounded: 'lg' },
       VCard: { flat: true, border: true, rounded: 'xl' },

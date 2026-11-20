@@ -24,7 +24,6 @@ definePageMeta({
   title: 'Start',
 })
 
-// Geplante Bereiche laut PROJEKT.md
 const FEATURES = [
   { icon: FileUp, title: 'Dokumente', text: 'PDF und Markdown hochladen, Verarbeitung mit Status.' },
   { icon: MessageSquare, title: 'Chat', text: 'Fragen stellen, Antworten mit Quellen und Textstelle.' },
