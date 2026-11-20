@@ -1,7 +1,6 @@
 <template>
   <div class="d-flex flex-column ga-4">
     <h2 class="text-headline-small font-weight-semibold tracking-tight">Firmenwissen-Assistent</h2>
-    <p class="text-body-medium text-muted">Angemeldet als {{ auth.user?.email }}</p>
 
     <v-card v-for="feature in FEATURES" :key="feature.title" class="d-flex align-center ga-3 pa-4">
       <v-avatar size="36" rounded="lg" color="secondary">
@@ -24,8 +23,6 @@ definePageMeta({
   middleware: 'auth',
   title: 'Start',
 })
-
-const auth = useAuthStore()
 
 // Geplante Bereiche laut PROJEKT.md
 const FEATURES = [

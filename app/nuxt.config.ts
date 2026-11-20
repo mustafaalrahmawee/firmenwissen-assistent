@@ -5,6 +5,16 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
 
+  // Reine SPA: alles läuft im Browser, der Token liegt in localStorage
+  ssr: false,
+
+  runtimeConfig: {
+    public: {
+      // Überschreibbar mit NUXT_PUBLIC_API_BASE
+      apiBase: 'http://localhost:8000/api/v1',
+    },
+  },
+
   css: ['@fontsource-variable/inter', '~/assets/css/main.css'],
 
   build: {

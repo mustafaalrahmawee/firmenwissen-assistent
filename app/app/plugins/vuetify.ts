@@ -67,18 +67,18 @@ const dark: ThemeDefinition = {
   },
 }
 
+const THEME_KEY = 'theme'
+
 export default defineNuxtPlugin((nuxtApp) => {
-  // Farbschema aus dem Cookie, damit schon das Server-HTML richtig aussieht
-  const savedTheme = useCookie<'light' | 'dark'>('theme')
+  // Gespeichertes Farbschema, damit die Seite nicht erst hell aufblitzt
+  const savedTheme = localStorage.getItem(THEME_KEY)
 
   const vuetify = createVuetify({
-    // Server rendert für Desktop-Breite; die Seitenleiste ist dann sofort da
-    ssr: { clientWidth: 1280, clientHeight: 800 },
     display: { mobileBreakpoint: 'md' },
     locale: { locale: 'de', messages: { de } },
     icons: { defaultSet: 'mdi', aliases, sets: { mdi } },
     theme: {
-      defaultTheme: savedTheme.value === 'dark' ? 'dark' : 'light',
+      defaultTheme: savedTheme === 'dark' ? 'dark' : 'light',
       themes: { light, dark },
     },
     // Flacher, ruhiger Stil wie in job-match
@@ -94,4 +94,7 @@ export default defineNuxtPlugin((nuxtApp) => {
   })
 
   nuxtApp.vueApp.use(vuetify)
+
+  // Jeder Wechsel (theme.toggle() in den Layouts) wird gespeichert
+  watch(vuetify.theme.global.name, (name) => localStorage.setItem(THEME_KEY, name))
 })
