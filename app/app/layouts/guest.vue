@@ -2,28 +2,16 @@
 <template>
   <v-app>
     <v-main class="bg-sidebar">
-      <ThemeToggle class="theme-toggle" />
+      <ThemeToggle class="position-absolute top-0 right-0 ma-3" />
 
-      <div class="guest d-flex align-center justify-center pa-4">
-        <div class="d-flex flex-column align-center ga-8 w-100" style="max-width: 384px">
+      <v-sheet min-height="100svh" color="transparent" class="d-flex align-center justify-center pa-4">
+        <v-sheet max-width="384" color="transparent" class="d-flex flex-column align-center ga-8 w-100">
           <AppLogo />
           <div class="w-100">
             <slot />
           </div>
-        </div>
-      </div>
+        </v-sheet>
+      </v-sheet>
     </v-main>
   </v-app>
 </template>
-
-<style scoped>
-.guest {
-  min-height: 100svh;
-}
-
-.theme-toggle {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-}
-</style>

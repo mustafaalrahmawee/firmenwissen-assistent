@@ -1,15 +1,4 @@
 <!-- Layout für angemeldete Nutzer: definePageMeta({ layout: 'auth', middleware: 'auth', title: '…' }) -->
-<script setup lang="ts">
-import { PanelLeft } from '@lucide/vue'
-import { useDisplay } from 'vuetify'
-
-const ui = useUiStore()
-const route = useRoute()
-const { mobile } = useDisplay()
-
-const title = computed(() => (route.meta.title as string | undefined) ?? '')
-</script>
-
 <template>
   <!-- Ein Wurzelelement (nicht <slot />), damit Nuxt Layout-Wechsel animieren kann -->
   <v-app>
@@ -36,15 +25,20 @@ const title = computed(() => (route.meta.title as string | undefined) ?? '')
     </v-app-bar>
 
     <v-main>
-      <div class="page mx-auto pa-6">
+      <v-sheet max-width="672" color="transparent" class="mx-auto pa-6">
         <slot />
-      </div>
+      </v-sheet>
     </v-main>
   </v-app>
 </template>
 
-<style scoped>
-.page {
-  max-width: 672px;
-}
-</style>
+<script setup lang="ts">
+import { PanelLeft } from '@lucide/vue'
+import { useDisplay } from 'vuetify'
+
+const ui = useUiStore()
+const route = useRoute()
+const { mobile } = useDisplay()
+
+const title = computed(() => (route.meta.title as string | undefined) ?? '')
+</script>

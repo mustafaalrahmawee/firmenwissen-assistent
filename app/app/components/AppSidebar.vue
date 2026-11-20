@@ -1,23 +1,7 @@
 <!-- Seitenleiste wie in job-match: Logo, Navigation, Nutzer mit Abmelden unten -->
-<script setup lang="ts">
-import { House, LogOut, PanelLeft } from '@lucide/vue'
-
-const NAV = [
-  { to: '/', label: 'Start', icon: House },
-]
-
-const ui = useUiStore()
-const auth = useAuthStore()
-
-async function logout() {
-  auth.logout()
-  await navigateTo('/login')
-}
-</script>
-
 <template>
   <v-navigation-drawer v-model="ui.drawer" color="sidebar" width="256">
-    <div class="sidebar-header d-flex align-center justify-space-between px-4">
+    <v-sheet height="56" color="transparent" class="d-flex align-center justify-space-between px-4">
       <AppLogo />
       <v-btn
         variant="text"
@@ -30,20 +14,18 @@ async function logout() {
       >
         <PanelLeft :size="16" />
       </v-btn>
-    </div>
+    </v-sheet>
 
     <v-list nav base-color="muted-foreground" color="on-surface" class="px-2 pt-1">
-      <v-list-item
-        v-for="item in NAV"
-        :key="item.to"
-        :to="item.to"
-        exact
-        rounded="lg"
-      >
+      <v-list-item v-for="item in NAV" :key="item.to" :to="item.to" exact rounded="lg">
         <template #prepend>
           <component :is="item.icon" :size="16" class="mr-3" />
         </template>
-        <v-list-item-title class="text-body-medium">{{ item.label }}</v-list-item-title>
+        <template #default="{ isActive }">
+          <v-list-item-title :class="['text-body-medium', isActive && 'font-weight-medium']">
+            {{ item.label }}
+          </v-list-item-title>
+        </template>
       </v-list-item>
     </v-list>
 
@@ -52,7 +34,7 @@ async function logout() {
         <v-avatar size="32" color="secondary" class="text-body-small font-weight-semibold">
           {{ auth.user.email.charAt(0).toUpperCase() }}
         </v-avatar>
-        <div class="d-flex flex-column flex-grow-1" style="min-width: 0">
+        <div class="d-flex flex-column flex-grow-1 overflow-hidden">
           <span class="text-body-medium font-weight-medium text-truncate">{{ auth.user.email }}</span>
           <span class="text-body-small text-muted text-truncate">Mitglied</span>
         </div>
@@ -72,13 +54,18 @@ async function logout() {
   </v-navigation-drawer>
 </template>
 
-<style scoped>
-.sidebar-header {
-  height: 56px;
-}
+<script setup lang="ts">
+import { House, LogOut, PanelLeft } from '@lucide/vue'
 
-/* Aktiver Eintrag fett wie in job-match */
-.v-list-item--active :deep(.v-list-item-title) {
-  font-weight: 500;
+const NAV = [
+  { to: '/', label: 'Start', icon: House },
+]
+
+const ui = useUiStore()
+const auth = useAuthStore()
+
+async function logout() {
+  auth.logout()
+  await navigateTo('/login')
 }
-</style>
+</script>
