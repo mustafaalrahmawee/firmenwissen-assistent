@@ -26,7 +26,7 @@ Portfolio-Projekt: Ein Multi-Tenant-Wissensassistent für IT-KMU. Teams laden Do
 
 ### Enthalten
 
-- **Anmeldung und Arbeitsbereiche:** Login mit Sanctum, jeder Nutzer gehört zu einem Tenant, Daten sind strikt getrennt.
+- **Anmeldung und Arbeitsbereiche:** Login mit Sanctum, jeder Nutzer gehört zu genau einem Tenant, Daten sind strikt getrennt. Nutzer können sich mit E-Mail und Passwort selbst registrieren; für die Live-Demo gibt es zusätzlich einen fertigen Demo-Zugang.
 - **Dokumenten-Upload:** PDF und Markdown. Verarbeitung (Text extrahieren, zerteilen, einbetten, indexieren) läuft über Queues mit sichtbarem Status.
 - **RAG-Chat:** Gestreamte Antworten mit Quellen und Sprung zur Textstelle.
 - **Advanced RAG:** Anfrage umschreiben, Hybrid-Suche, Reranking, Kontext erweitern (Details im Anchor unter `docs/anchor/rag`).
