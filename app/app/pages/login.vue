@@ -12,7 +12,7 @@
       {{ error }}
     </v-alert>
 
-    <form class="d-flex flex-column ga-4" @submit.prevent="submit">
+    <v-form ref="form" v-model="formValid" class="d-flex flex-column ga-4" @submit.prevent="submit">
       <div class="d-flex flex-column ga-2">
         <label :for="emailId" class="text-body-medium font-weight-medium">E-Mail</label>
         <v-text-field
@@ -21,7 +21,9 @@
           type="email"
           autocomplete="username"
           hide-details="auto"
-          required
+          :rules="EMAIL_RULES"
+          :error-messages="fieldErrors.email"
+          @update:model-value="clearFieldErrors"
         />
       </div>
       <div class="d-flex flex-column ga-2">
@@ -32,32 +34,96 @@
           type="password"
           autocomplete="current-password"
           hide-details="auto"
-          required
+          :rules="PASSWORD_RULES"
+          :error-messages="fieldErrors.password"
+          @update:model-value="clearFieldErrors"
         />
       </div>
-      <v-btn type="submit" color="primary" height="36" block class="mt-2" :loading="busy">
+      <v-btn type="submit" color="primary" height="36" block class="mt-2" :loading="busy" :disabled="busy || formValid === false">
         Anmelden
       </v-btn>
-    </form>
+    </v-form>
   </v-card>
 </template>
 
 <script setup lang="ts">
 import { CircleAlert } from '@lucide/vue'
+import { FetchError } from 'ofetch'
+import type { VForm } from 'vuetify/components'
 
 definePageMeta({
   layout: 'guest',
   middleware: 'guest',
 })
 
+const EMAIL_RULES = [
+  (value: string) => !!value || 'Bitte gib deine E-Mail-Adresse ein.',
+  (value: string) => /^[^\s@]+@[^\s@]+$/.test(value) || 'Bitte gib eine gültige E-Mail-Adresse ein.',
+]
+const PASSWORD_RULES = [(value: string) => !!value || 'Bitte gib dein Passwort ein.']
+const ERROR_VISIBLE_MS = 8000
+
+const auth = useAuthStore()
+const form = ref<VForm | null>(null)
+const formValid = ref<boolean | null>(null)
 const emailId = useId()
 const passwordId = useId()
 const email = ref('')
 const password = ref('')
+const fieldErrors = reactive<{ email: string[], password: string[] }>({ email: [], password: [] })
 const error = ref<string | null>(null)
 const busy = ref(false)
+let errorTimer: ReturnType<typeof setTimeout> | undefined
+
+function showError(message: string) {
+  clearTimeout(errorTimer)
+  error.value = message
+  errorTimer = setTimeout(() => (error.value = null), ERROR_VISIBLE_MS)
+}
+
+function clearFieldErrors() {
+  fieldErrors.email = []
+  fieldErrors.password = []
+}
 
 async function submit() {
-  // TODO: Anmeldung über $api('/login', …)
+  const { valid } = await form.value!.validate()
+  if (valid === true && busy.value === false) {
+    busy.value = true
+    clearTimeout(errorTimer)
+    error.value = null
+    clearFieldErrors()
+
+    try {
+      await auth.login(email.value, password.value)
+      await navigateTo('/')
+    }
+    catch (caught) {
+      const status = caught instanceof FetchError ? caught.response?.status : undefined
+
+      if (status === 422) {
+        const errors = (caught as FetchError).data?.errors ?? {}
+        if (errors.credentials) {
+          showError(errors.credentials[0])
+        }
+        fieldErrors.email = errors.email ?? []
+        fieldErrors.password = errors.password ?? []
+      }
+      else if (status === 429) {
+        showError('Zu viele Anmeldeversuche. Bitte warte eine Minute und versuche es dann erneut.')
+      }
+      else if (status === undefined) {
+        showError('Der Server ist nicht erreichbar. Bitte versuche es später erneut.')
+      }
+      else {
+        showError('Die Anmeldung ist fehlgeschlagen. Bitte versuche es erneut.')
+      }
+    }
+    finally {
+      busy.value = false
+    }
+  }
 }
+
+onBeforeUnmount(() => clearTimeout(errorTimer))
 </script>
