@@ -24,11 +24,18 @@ export const $api = ofetch.create({
   },
 
   async onResponseError({ response }) {
-    // Token abgelaufen oder widerrufen: Token und Person löschen und zum Login
+    // Token abgelaufen oder widerrufen: Token und Person löschen und zum Login.
+    // Das Ziel kommt aus der Adresszeile, weil der Router beim Start (Plugin auth)
+    // die aufgerufene Seite noch nicht kennt. Auf der Anmeldeseite bleibt die Adresse
+    // samt ?redirect= stehen.
     if (response.status === 401) {
       localStorage.removeItem(TOKEN_KEY)
       useAuthStore().clear()
-      await navigateTo('/login')
+
+      const { pathname, search, hash } = window.location
+      if (pathname !== '/login') {
+        await navigateTo({ path: '/login', query: { redirect: pathname + search + hash } })
+      }
     }
   },
 })

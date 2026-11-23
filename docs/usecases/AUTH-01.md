@@ -64,7 +64,7 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | S1 | Befehl `app:create-demo-user` | Legt den Demo-Zugang mit bekannten Zugangsdaten an oder setzt ihn zurück. | entfällt – läuft im Terminal | Demo-Zugang ohne Handarbeit; Demo-Passwort erfüllt die Passwortregel | fertig |
 | S2 | `POST /api/v1/login` | Meldet die Person mit E-Mail und Passwort an und gibt ihr einen Zugang für dieses Gerät. | Anmeldeseite: Formular mit Vuetify-Regeln, Fehler am Feld, Meldung bei falschen Daten, Sperre und Serverausfall, danach Startseite | richtige Daten führen zur Startseite; falsche Daten mit Meldung ohne Hinweis auf bekannte Adressen; leere und ungültige Eingaben; Passwortregel; Sperre nach Fehlversuchen; doppelter Klick; Server nicht erreichbar | fertig |
 | S3 | `GET /api/v1/user` | Sagt der Anwendung, wer mit dem gespeicherten Zugang angemeldet ist. | Pinia-Store `auth` lädt die Person; Name und E-Mail in der Seitenleiste | zeigt, wer angemeldet ist; nach dem Neuladen weiterhin angemeldet; ungültig gewordene Anmeldung führt zur Anmeldeseite | fertig |
-| S4 | Middleware `auth` | Schickt Personen ohne Anmeldung von jeder geschützten Seite zur Anmeldeseite und nach der Anmeldung zurück. | Seitenwächter in `app/app/middleware/`, Anmeldeseite übernimmt das Ziel | geschützte Seite ohne Anmeldung; Rückkehr zur gewünschten Seite; Zurück-Knopf nach dem Abmelden | offen – Code vorhanden |
+| S4 | Middleware `auth` | Schickt Personen ohne Anmeldung von jeder geschützten Seite zur Anmeldeseite und nach der Anmeldung zurück. | Seitenwächter in `app/app/middleware/`, Anmeldeseite übernimmt das Ziel | geschützte Seite ohne Anmeldung; Rückkehr zur gewünschten Seite; Zurück-Knopf nach dem Abmelden | fertig |
 | S5 | Middleware `guest` | Schickt angemeldete Personen von der Anmeldeseite zur Startseite. | Seitenwächter in `app/app/middleware/` | angemeldete Person ruft die Anmeldeseite auf | offen – Code vorhanden |
 | S6 | `POST /api/v1/logout` | Beendet die Anmeldung auf diesem Gerät. | Knopf „Abmelden“ in der Seitenleiste, danach Anmeldeseite | Abmelden wird angeboten; alter Zugang ungültig, auch aufbewahrt; andere Geräte bleiben angemeldet; doppeltes Abmelden und schon ungültige Anmeldung; Server nicht erreichbar | offen |
 
@@ -138,6 +138,28 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 
 **Wahl (Person):** E6: Vorschlag 2
 
+### E7 · S4 · Woran erkennt der Seitenwächter, dass jemand angemeldet ist?
+
+**Warum sich die Frage stellt:** Meist sind gespeicherter Zugang und geladene Person beide da oder beide weg. Ist der Server beim Start aber nicht erreichbar, bleibt der Zugang gespeichert und die Person leer (E6). Dann muss der Wächter entscheiden, ob er die geschützte Seite zeigt.
+
+| Vorschlag | Was gebaut würde | Was daraus folgt |
+| --- | --- | --- |
+| 1 | Angemeldet ist, wer eine geladene Person im Store hat. | Bei Serverausfall beim Start landet die Person auf der Anmeldeseite, obwohl ihr Zugang gespeichert bleibt; nach dem nächsten Neuladen mit erreichbarem Server ist sie wieder drin. Eine geschützte Seite erscheint nie ohne bekannte Person. S5 kann dieselbe Prüfung umgekehrt nutzen. |
+| 2 | Angemeldet ist, wer einen gespeicherten Zugang hat. | Bei Serverausfall beim Start erscheint die geschützte Seite ohne Person in der Seitenleiste; ob der Zugang noch gilt, klärt die nächste Anfrage (401 führt zur Anmeldeseite). Seiten müssen damit rechnen, dass die Person fehlt. |
+
+**Wahl (Person):** E7 Vorschlag 1
+
+### E8 · S4 · Wie kommt der Seitenwächter an jede geschützte Seite?
+
+**Warum sich die Frage stellt:** Geschützt ist jede Seite außer der Anmeldeseite. Später kommen viele Seiten dazu (Dokumente, Chat, MCP, Auswertung).
+
+| Vorschlag | Was gebaut würde | Was daraus folgt |
+| --- | --- | --- |
+| 1 | Jede geschützte Seite nennt den Wächter selbst (`middleware: 'auth'`), wie heute die Startseite. | Man sieht an jeder Seite, dass sie geschützt ist. Vergisst eine neue Seite den Eintrag, ist sie ungeschützt; die API verlangt trotzdem einen Zugang, aber die Seite erscheint. |
+| 2 | Der Wächter läuft global vor jeder Seite; nur Seiten, die als Gast-Seite markiert sind (heute die Anmeldeseite), nimmt er aus. | Eine neue Seite ist ohne weiteren Eintrag geschützt. Die Ausnahme steht an der Anmeldeseite; der Eintrag `middleware: 'auth'` an der Startseite fällt weg. |
+
+**Wahl (Person):** E8 Vorschlag 1
+
 ### Vom Schreiber entschieden
 
 | Schritt | Was | Entscheidung | Warum |
@@ -156,6 +178,8 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | S3 | Antwort von `login` | Wird in S3 auf `{ data: { token } }` umgestellt, mit Test und Store. | Jede Antwort steht in `data` (Vorgabe der Person); `login` aus S2 kam noch ohne Hülle. |
 | S3 | Rate-Limit | `GET /user` bekommt kein eigenes Rate-Limit. | Die Route verlangt einen gültigen Zugang und gibt nur die eigenen Daten zurück; missbrauchbar ist sie nicht. |
 | S3 | Ungültiger Zugang | Bei jeder Antwort 401, egal von welcher Anfrage, löscht `$api` den gespeicherten Zugang, leert die Person im Store und geht zur Anmeldeseite. | Ein Zugang kann ablaufen, während die Anwendung offen ist; sonst bliebe die Person im Store stehen, obwohl ihr Zugang nicht mehr gilt. |
+| S4 | Ziel nach der Anmeldung | Der Wächter hängt die gewünschte Seite als `redirect` an die Anmeldeseite; die Anmeldeseite folgt nur Pfaden, die mit genau einem `/` beginnen, sonst geht sie zu `/`. | Sonst ließe sich über einen Link zur Anmeldeseite auf eine fremde Adresse weiterleiten. |
+| S4 | Ziel bei 401 | Führt eine 401-Antwort zur Anmeldeseite, nimmt `$api` die aktuelle Seite als `redirect` mit. | Wer während der Arbeit abgemeldet wird, landet nach der Anmeldung wieder dort. |
 
 # Offene Punkte
 
@@ -167,3 +191,7 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 - S3 · Re-Review R2: ofetch stoppt die Zeitgrenze, sobald die HTTP-Header da sind. Sendet die API die Header und liefert den Inhalt nicht zu Ende, wartet das Start-Plugin weiter.
 - S3 · Re-Review R4: Ein 401 während der Nutzung (Store schon gefüllt, Seite offen) ist noch nicht im Browser geprüft; das geht erst, wenn eine Seite ohne Neuladen die API aufruft (S6 oder später).
 - S3 · Re-Review N1: Das Zurückrollen in `login` löscht den gespeicherten Zugang auch dann, wenn ein anderer Tab ihn inzwischen durch einen neuen ersetzt hat. Wie bei R3 aus S3 betrifft das nur mehrere Tabs mit genau diesem Timing.
+- S4 · Re-Review R3: Die Ausnahme in `$api` greift nur für genau `/login`. Kommt ein 401 auf `/login/?redirect=…`, wird das Ziel durch die Anmeldeseite selbst ersetzt, und der nächste Versuch landet auf `/`.
+- S4 · Re-Review R4: Im Browser ungeprüft sind die Rückkehr mit Fragment (`#…`) und der Zurück-Knopf bei geleerter Person; Letzteres geht erst mit S6.
+- S4 · Re-Review N1: `new URL()` in `redirectTarget()` wirft bei einem ungültigen Ziel wie `/\[`; dann bleibt die Anmeldeseite stehen und meldet fälschlich „Server nicht erreichbar“.
+- S4 · Re-Review N2: Ein Ziel wie `/.//example.invalid` besteht die Origin-Prüfung, ergibt nach der Normalisierung aber `//example.invalid`; Nuxt bricht die Navigation ab. Auch das zusammengesetzte Ziel muss mit genau einem `/` beginnen.

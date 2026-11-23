@@ -64,6 +64,8 @@ const PASSWORD_RULES = [(value: string) => !!value || 'Bitte gib dein Passwort e
 const ERROR_VISIBLE_MS = 8000
 
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const form = ref<VForm | null>(null)
 const formValid = ref<boolean | null>(null)
 const emailId = useId()
@@ -81,6 +83,19 @@ function showError(message: string) {
   errorTimer = setTimeout(() => (error.value = null), ERROR_VISIBLE_MS)
 }
 
+// Nur Ziele innerhalb der Anwendung und nicht die Anmeldeseite selbst. Der URL-Parser
+// deckt auch Schreibweisen ab, die der Browser als fremde Adresse liest ("//host", "/\host").
+function redirectTarget() {
+  const redirect = route.query.redirect
+  if (typeof redirect !== 'string' || !redirect.startsWith('/')) return '/'
+
+  const url = new URL(redirect, window.location.origin)
+  if (url.origin !== window.location.origin) return '/'
+
+  const target = url.pathname + url.search + url.hash
+  return router.resolve(target).name === 'login' ? '/' : target
+}
+
 function clearFieldErrors() {
   fieldErrors.email = []
   fieldErrors.password = []
@@ -96,7 +111,7 @@ async function submit() {
 
     try {
       await auth.login(email.value, password.value)
-      await navigateTo('/')
+      await navigateTo(redirectTarget())
     }
     catch (caught) {
       const status = caught instanceof FetchError ? caught.response?.status : undefined
