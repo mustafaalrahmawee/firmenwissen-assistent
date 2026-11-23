@@ -14,7 +14,9 @@ class UserResource extends JsonResource
     /**
      * Transform the resource into an array.
      *
-     * @return array{id: int, name: string, email: string}
+     * The workspace comes from the relation of this user, never from the request.
+     *
+     * @return array{id: int, name: string, email: string, tenant: TenantResource}
      */
     public function toArray(Request $request): array
     {
@@ -22,6 +24,7 @@ class UserResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'email' => $this->email,
+            'tenant' => TenantResource::make($this->tenant),
         ];
     }
 }

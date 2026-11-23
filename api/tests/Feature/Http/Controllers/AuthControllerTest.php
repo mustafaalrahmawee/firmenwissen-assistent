@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -192,17 +193,76 @@ describe('POST /api/v1/login', function () {
 });
 
 describe('GET /api/v1/user', function () {
-    it('returns id, name and email of the user the token belongs to', function () {
-        $jana = User::factory()->create(['name' => 'Jana Petrov', 'email' => 'jana.petrov@nordlicht-it.test']);
-        User::factory()->create(['name' => 'Tobias Kern', 'email' => 'tobias.kern@nordlicht-it.test']);
+    it('returns id, name, email and the workspace name of the user the token belongs to', function () {
+        $nordlicht = Tenant::factory()->create(['name' => 'Nordlicht IT GmbH']);
+        $jana = User::factory()->for($nordlicht)->create(['name' => 'Jana Petrov', 'email' => 'jana.petrov@nordlicht-it.test']);
+        User::factory()->create(['name' => 'Mehmet Aydin', 'email' => 'mehmet.aydin@hafenkante.test']);
         $token = $jana->createToken('web')->plainTextToken;
 
         $response = $this->withToken($token)->getJson(USER_URL);
 
         $response->assertOk()->assertExactJson([
-            'data' => ['id' => $jana->id, 'name' => 'Jana Petrov', 'email' => 'jana.petrov@nordlicht-it.test'],
+            'data' => [
+                'id' => $jana->id,
+                'name' => 'Jana Petrov',
+                'email' => 'jana.petrov@nordlicht-it.test',
+                'tenant' => ['name' => 'Nordlicht IT GmbH'],
+            ],
         ]);
     });
+
+    it('returns the same workspace for two users of one firm and only its own workspace for another firm', function () {
+        $nordlicht = Tenant::factory()->create(['name' => 'Nordlicht IT GmbH']);
+        $hafenkante = Tenant::factory()->create(['name' => 'Hafenkante Systemhaus GmbH']);
+        $jana = User::factory()->for($nordlicht)->create();
+        $tobias = User::factory()->for($nordlicht)->create();
+        $mehmet = User::factory()->for($hafenkante)->create();
+
+        $workspaceOf = function (User $user): ?string {
+            Auth::forgetGuards();
+
+            return $this->withToken($user->createToken('web')->plainTextToken)
+                ->getJson(USER_URL)
+                ->assertOk()
+                ->json('data.tenant.name');
+        };
+
+        expect($workspaceOf($jana))->toBe('Nordlicht IT GmbH')
+            ->and($workspaceOf($tobias))->toBe('Nordlicht IT GmbH')
+            ->and($workspaceOf($mehmet))->toBe('Hafenkante Systemhaus GmbH');
+    });
+
+    it('returns the same workspace on every device of the user', function () {
+        $jana = User::factory()->for(Tenant::factory()->state(['name' => 'Nordlicht IT GmbH']))->create();
+        $laptopToken = $jana->createToken('laptop')->plainTextToken;
+        $phoneToken = $jana->createToken('phone')->plainTextToken;
+
+        $this->withToken($laptopToken)->getJson(USER_URL)->assertJsonPath('data.tenant.name', 'Nordlicht IT GmbH');
+        Auth::forgetGuards();
+        $this->withToken($phoneToken)->getJson(USER_URL)->assertJsonPath('data.tenant.name', 'Nordlicht IT GmbH');
+    });
+
+    it('ignores a workspace that the request names in the query, the body or a header', function (string $place) {
+        $hafenkante = Tenant::factory()->create(['name' => 'Hafenkante Systemhaus GmbH']);
+        $nordlicht = Tenant::factory()->create(['name' => 'Nordlicht IT GmbH']);
+        $mehmet = User::factory()->for($hafenkante)->create(['name' => 'Mehmet Aydin', 'email' => 'mehmet.aydin@hafenkante.test']);
+        $request = $this->withToken($mehmet->createToken('web')->plainTextToken);
+
+        $response = match ($place) {
+            'query' => $request->getJson(USER_URL.'?tenant_id='.$nordlicht->id),
+            'body' => $request->json('GET', USER_URL, ['tenant_id' => $nordlicht->id]),
+            'header' => $request->withHeader('X-Tenant-Id', $nordlicht->id)->getJson(USER_URL),
+        };
+
+        $response->assertOk()->assertExactJson([
+            'data' => [
+                'id' => $mehmet->id,
+                'name' => 'Mehmet Aydin',
+                'email' => 'mehmet.aydin@hafenkante.test',
+                'tenant' => ['name' => 'Hafenkante Systemhaus GmbH'],
+            ],
+        ]);
+    })->with(['query', 'body', 'header']);
 
     it('returns 401 without a token', function () {
         $response = $this->getJson(USER_URL);

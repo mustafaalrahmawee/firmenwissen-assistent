@@ -4,17 +4,31 @@
   <v-app>
     <v-navigation-drawer v-model="drawer" color="sidebar" width="256">
       <v-sheet height="56" color="transparent" class="d-flex align-center justify-space-between px-4">
-        <div class="d-flex align-center ga-2">
-          <v-avatar size="28" rounded="lg" color="brand">
+        <div class="d-flex align-center ga-2 overflow-hidden">
+          <v-avatar size="28" rounded="lg" color="brand" class="flex-shrink-0">
             <BookOpenText :size="16" />
           </v-avatar>
-          <span class="text-title-medium font-weight-semibold tracking-tight">Firmenwissen</span>
+          <div class="d-flex flex-column overflow-hidden">
+            <span class="text-title-medium font-weight-semibold tracking-tight">Firmenwissen</span>
+            <v-tooltip v-if="auth.user" :text="auth.user.tenant.name" location="bottom start" open-on-click>
+              <template #activator="{ props }">
+                <span
+                  v-bind="props"
+                  tabindex="0"
+                  class="text-body-small text-muted text-truncate"
+                  :aria-label="`Arbeitsbereich: ${auth.user.tenant.name}`"
+                >
+                  {{ auth.user.tenant.name }}
+                </span>
+              </template>
+            </v-tooltip>
+          </div>
         </div>
         <v-btn
           variant="text"
           size="small"
           icon
-          class="text-muted"
+          class="text-muted flex-shrink-0"
           aria-label="Seitenleiste schließen"
           title="Seitenleiste schließen"
           @click="drawer = false"

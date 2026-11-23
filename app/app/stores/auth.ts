@@ -1,9 +1,14 @@
 import { defineStore } from 'pinia'
 
+export interface Tenant {
+  name: string
+}
+
 export interface User {
   id: number
   name: string
   email: string
+  tenant: Tenant
 }
 
 const AUTH_REQUEST_TIMEOUT_MS = 5000
