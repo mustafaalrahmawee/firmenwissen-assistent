@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\LoginRequest;
+use App\Http\Resources\UserResource;
 use App\Models\User;
-use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
@@ -21,7 +23,7 @@ class AuthController extends Controller
      *
      * An unknown email address and a wrong password give the same answer.
      */
-    public function login(LoginRequest $request): JsonResponse
+    public function login(LoginRequest $request): JsonResource
     {
         $credentials = $request->validated();
         $user = User::where('email', $credentials['email'])->first();
@@ -34,8 +36,16 @@ class AuthController extends Controller
             ]);
         }
 
-        return response()->json([
+        return JsonResource::make([
             'token' => $user->createToken('web', ['*'], now()->addMinutes(config('sanctum.expiration')))->plainTextToken,
         ]);
+    }
+
+    /**
+     * Return the user the token belongs to.
+     */
+    public function user(Request $request): UserResource
+    {
+        return UserResource::make($request->user());
     }
 }

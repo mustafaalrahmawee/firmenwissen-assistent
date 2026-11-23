@@ -35,6 +35,18 @@
           </template>
         </v-list-item>
       </v-list>
+
+      <template v-if="auth.user" #append>
+        <div class="d-flex align-center ga-3 border-t px-3 py-3">
+          <v-avatar size="32" color="secondary" class="text-label-medium font-weight-semibold">
+            {{ auth.user.name.charAt(0).toUpperCase() }}
+          </v-avatar>
+          <div class="d-flex flex-column flex-grow-1 overflow-hidden">
+            <span class="text-body-medium font-weight-medium text-truncate">{{ auth.user.name }}</span>
+            <span class="text-body-small text-muted text-truncate">{{ auth.user.email }}</span>
+          </div>
+        </div>
+      </template>
     </v-navigation-drawer>
 
     <v-app-bar flat height="56" color="background" class="border-b">
@@ -83,6 +95,7 @@ const NAV = [
   { to: '/', label: 'Start', icon: House },
 ]
 
+const auth = useAuthStore()
 const route = useRoute()
 const { mobile } = useDisplay()
 const theme = useTheme()

@@ -63,7 +63,7 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | --- | --- | --- | --- | --- | --- |
 | S1 | Befehl `app:create-demo-user` | Legt den Demo-Zugang mit bekannten Zugangsdaten an oder setzt ihn zurück. | entfällt – läuft im Terminal | Demo-Zugang ohne Handarbeit; Demo-Passwort erfüllt die Passwortregel | fertig |
 | S2 | `POST /api/v1/login` | Meldet die Person mit E-Mail und Passwort an und gibt ihr einen Zugang für dieses Gerät. | Anmeldeseite: Formular mit Vuetify-Regeln, Fehler am Feld, Meldung bei falschen Daten, Sperre und Serverausfall, danach Startseite | richtige Daten führen zur Startseite; falsche Daten mit Meldung ohne Hinweis auf bekannte Adressen; leere und ungültige Eingaben; Passwortregel; Sperre nach Fehlversuchen; doppelter Klick; Server nicht erreichbar | fertig |
-| S3 | `GET /api/v1/user` | Sagt der Anwendung, wer mit dem gespeicherten Zugang angemeldet ist. | Pinia-Store `auth` lädt die Person; Name und E-Mail in der Seitenleiste | zeigt, wer angemeldet ist; nach dem Neuladen weiterhin angemeldet; ungültig gewordene Anmeldung führt zur Anmeldeseite | offen |
+| S3 | `GET /api/v1/user` | Sagt der Anwendung, wer mit dem gespeicherten Zugang angemeldet ist. | Pinia-Store `auth` lädt die Person; Name und E-Mail in der Seitenleiste | zeigt, wer angemeldet ist; nach dem Neuladen weiterhin angemeldet; ungültig gewordene Anmeldung führt zur Anmeldeseite | fertig |
 | S4 | Middleware `auth` | Schickt Personen ohne Anmeldung von jeder geschützten Seite zur Anmeldeseite und nach der Anmeldung zurück. | Seitenwächter in `app/app/middleware/`, Anmeldeseite übernimmt das Ziel | geschützte Seite ohne Anmeldung; Rückkehr zur gewünschten Seite; Zurück-Knopf nach dem Abmelden | offen – Code vorhanden |
 | S5 | Middleware `guest` | Schickt angemeldete Personen von der Anmeldeseite zur Startseite. | Seitenwächter in `app/app/middleware/` | angemeldete Person ruft die Anmeldeseite auf | offen – Code vorhanden |
 | S6 | `POST /api/v1/logout` | Beendet die Anmeldung auf diesem Gerät. | Knopf „Abmelden“ in der Seitenleiste, danach Anmeldeseite | Abmelden wird angeboten; alter Zugang ungültig, auch aufbewahrt; andere Geräte bleiben angemeldet; doppeltes Abmelden und schon ungültige Anmeldung; Server nicht erreichbar | offen |
@@ -127,6 +127,17 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 
 **Wahl (Person):** "E5 · S2 . Vorschlag 2"
 
+### E6 · S3 · Wann lädt die Anwendung, wer angemeldet ist?
+
+**Warum sich die Frage stellt:** Nach dem Neuladen liegt im Browser nur der gespeicherte Zugang; wer dahintersteht, muss die Anwendung erst beim Server erfragen. Davon hängt ab, was die Seitenleiste anfangs zeigt und worauf sich die Seitenwächter in S4 und S5 stützen können.
+
+| Vorschlag | Was gebaut würde | Was daraus folgt |
+| --- | --- | --- |
+| 1 | Das Layout für angemeldete Personen lädt die Person, sobald es erscheint, falls sie noch nicht geladen ist. | Die Seite erscheint sofort; Name und E-Mail-Adresse kommen in der Seitenleiste kurz danach dazu. S4 und S5 wissen beim Seitenwechsel nur, ob ein Zugang gespeichert ist, nicht ob er noch gilt; ein ungültiger Zugang fällt erst bei dieser Anfrage auf und führt dann zur Anmeldeseite. |
+| 2 | Beim Start der Anwendung lädt ein Plugin die Person, wenn ein Zugang gespeichert ist, bevor die erste Seite erscheint. | Die erste Seite wartet auf eine Anfrage, danach ist die Person überall bekannt. S4 und S5 können sich auf die geladene Person stützen; ein ungültiger Zugang führt gleich beim Start zur Anmeldeseite. Ist der Server beim Start nicht erreichbar, muss das Plugin den Start trotzdem fortsetzen. |
+
+**Wahl (Person):** E6: Vorschlag 2
+
 ### Vom Schreiber entschieden
 
 | Schritt | Was | Entscheidung | Warum |
@@ -141,6 +152,10 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | S2 | Antwort | Die Anmeldung gibt nur den Zugang zurück (`token`), keine Daten der Person. | Wer angemeldet ist, liefert S3; S2 baut nichts für einen späteren Schritt. |
 | S2 | Deutsche Meldungen | Im Form Request (`messages()`), dazu in der Seite für Sperre und Serverausfall; keine Sprachdateien. | Nur diese Meldungen braucht der Schritt. |
 | S2 | Doppelter Klick | Der Knopf ist gesperrt, solange die Anfrage läuft. | Ein zweiter Klick schickt keine zweite Anmeldung. |
+| S3 | Antwort | `id`, `name` und `email` über eine API Resource in der Hülle `data`. | Mehr braucht die Seitenleiste nicht; jede Antwort steht in `data` (Vorgabe der Person, `CLAUDE.md`). |
+| S3 | Antwort von `login` | Wird in S3 auf `{ data: { token } }` umgestellt, mit Test und Store. | Jede Antwort steht in `data` (Vorgabe der Person); `login` aus S2 kam noch ohne Hülle. |
+| S3 | Rate-Limit | `GET /user` bekommt kein eigenes Rate-Limit. | Die Route verlangt einen gültigen Zugang und gibt nur die eigenen Daten zurück; missbrauchbar ist sie nicht. |
+| S3 | Ungültiger Zugang | Bei jeder Antwort 401, egal von welcher Anfrage, löscht `$api` den gespeicherten Zugang, leert die Person im Store und geht zur Anmeldeseite. | Ein Zugang kann ablaufen, während die Anwendung offen ist; sonst bliebe die Person im Store stehen, obwohl ihr Zugang nicht mehr gilt. |
 
 # Offene Punkte
 
@@ -149,3 +164,6 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 - S2 · Re-Review R2: `Str::ascii()` gleicht im Schlüssel des Rate-Limits nur Akzente und Groß- und Kleinschreibung an. MySQL (`utf8mb4_unicode_ci`) hält auch Vollbreitenbuchstaben wie `ｊａｎａ…` für dieselbe Adresse wie `jana…`, sie zählen weiter getrennt.
 - S2 · Re-Review R4: Sanctum prüft neben `expires_at` weiter die aktuelle Einstellung `sanctum.expiration`. Ein Token mit 14 Tagen wird bei einer Senkung auf 7 Tage am achten Tag ungültig und nach Rückkehr auf 14 Tage wieder gültig, solange sein Datensatz noch da ist.
 - S2 · Re-Review N1: Der Ersatz-Hash in `AuthController` hat feste bcrypt-Kosten von 12. Weicht `BCRYPT_ROUNDS` davon ab, dauert die Prüfung für eine unbekannte Adresse anders lang als für ein vorhandenes Konto, und die Antwortzeit kann verraten, ob die Adresse bekannt ist.
+- S3 · Re-Review R2: ofetch stoppt die Zeitgrenze, sobald die HTTP-Header da sind. Sendet die API die Header und liefert den Inhalt nicht zu Ende, wartet das Start-Plugin weiter.
+- S3 · Re-Review R4: Ein 401 während der Nutzung (Store schon gefüllt, Seite offen) ist noch nicht im Browser geprüft; das geht erst, wenn eine Seite ohne Neuladen die API aufruft (S6 oder später).
+- S3 · Re-Review N1: Das Zurückrollen in `login` löscht den gespeicherten Zugang auch dann, wenn ein anderer Tab ihn inzwischen durch einen neuen ersetzt hat. Wie bei R3 aus S3 betrifft das nur mehrere Tabs mit genau diesem Timing.

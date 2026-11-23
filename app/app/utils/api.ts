@@ -24,9 +24,10 @@ export const $api = ofetch.create({
   },
 
   async onResponseError({ response }) {
-    // Token abgelaufen oder widerrufen: Token löschen und zum Login
+    // Token abgelaufen oder widerrufen: Token und Person löschen und zum Login
     if (response.status === 401) {
       localStorage.removeItem(TOKEN_KEY)
+      useAuthStore().clear()
       await navigateTo('/login')
     }
   },
