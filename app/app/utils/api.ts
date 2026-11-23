@@ -29,7 +29,6 @@ export const $api = ofetch.create({
     // die aufgerufene Seite noch nicht kennt. Auf der Anmeldeseite bleibt die Adresse
     // samt ?redirect= stehen.
     if (response.status === 401) {
-      localStorage.removeItem(TOKEN_KEY)
       useAuthStore().clear()
 
       const { pathname, search, hash } = window.location

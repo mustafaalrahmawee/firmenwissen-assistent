@@ -2,8 +2,8 @@
 
 - **Use Case:** AUTH-01, Anmelden und Abmelden mit Sanctum-Token, MVP (Woche 1)
 - **Baut auf:** nichts
-- **Status:** Schritte
-- **Code:** –
+- **Status:** fertig
+- **Code:** `api/app/Http/Controllers/AuthController.php`, `api/app/Http/Requests/LoginRequest.php`, `api/app/Http/Resources/UserResource.php`, `api/app/Console/Commands/CreateDemoUser.php`, `api/app/Providers/AppServiceProvider.php`, `api/routes/api.php`, `api/tests/Feature/Http/Controllers/AuthControllerTest.php`, `app/app/stores/auth.ts`, `app/app/plugins/auth.ts`, `app/app/middleware/auth.ts`, `app/app/middleware/guest.ts`, `app/app/pages/login.vue`, `app/app/layouts/auth.vue`
 
 Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten er gebaut wird (ein Schritt ist ein Endpunkt) und was dafür entschieden wurde. Alles mit dem Vermerk `Person` schreibt die Person selbst; der Schreiber trägt es wortgleich ein.
 
@@ -66,7 +66,7 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | S3 | `GET /api/v1/user` | Sagt der Anwendung, wer mit dem gespeicherten Zugang angemeldet ist. | Pinia-Store `auth` lädt die Person; Name und E-Mail in der Seitenleiste | zeigt, wer angemeldet ist; nach dem Neuladen weiterhin angemeldet; ungültig gewordene Anmeldung führt zur Anmeldeseite | fertig |
 | S4 | Middleware `auth` | Schickt Personen ohne Anmeldung von jeder geschützten Seite zur Anmeldeseite und nach der Anmeldung zurück. | Seitenwächter in `app/app/middleware/`, Anmeldeseite übernimmt das Ziel | geschützte Seite ohne Anmeldung; Rückkehr zur gewünschten Seite; Zurück-Knopf nach dem Abmelden | fertig |
 | S5 | Middleware `guest` | Schickt angemeldete Personen von der Anmeldeseite zur Startseite. | Seitenwächter in `app/app/middleware/` | angemeldete Person ruft die Anmeldeseite auf | fertig |
-| S6 | `POST /api/v1/logout` | Beendet die Anmeldung auf diesem Gerät. | Knopf „Abmelden“ in der Seitenleiste, danach Anmeldeseite | Abmelden wird angeboten; alter Zugang ungültig, auch aufbewahrt; andere Geräte bleiben angemeldet; doppeltes Abmelden und schon ungültige Anmeldung; Server nicht erreichbar | offen |
+| S6 | `POST /api/v1/logout` | Beendet die Anmeldung auf diesem Gerät. | Knopf „Abmelden“ in der Seitenleiste, danach Anmeldeseite | Abmelden wird angeboten; alter Zugang ungültig, auch aufbewahrt; andere Geräte bleiben angemeldet; doppeltes Abmelden und schon ungültige Anmeldung; Server nicht erreichbar | fertig |
 
 **Nicht abgedeckt:** alles abgedeckt
 
@@ -171,6 +171,17 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 
 **Wahl (Person):** E9: Vorschlag 1
 
+### E10 · S6 · Was geschieht beim Abmelden, wenn der Server nicht erreichbar ist?
+
+**Warum sich die Frage stellt:** Nach dem Abmelden soll der bisherige Zugang nicht mehr funktionieren, auch nicht aufbewahrt. Das kann nur der Server sicherstellen. Ist er nicht erreichbar, kann die Anwendung entweder trotzdem abmelden oder angemeldet bleiben.
+
+| Vorschlag | Was gebaut würde | Was daraus folgt |
+| --- | --- | --- |
+| 1 | Die Anwendung löscht den Zugang im Browser trotzdem und geht zur Anmeldeseite, mit einem Hinweis, dass der Server nicht erreicht wurde. | Auf diesem Gerät ist die Person sofort abgemeldet, auch am geteilten Rechner. Der Zugang bleibt auf dem Server aber gültig, bis er abläuft (7 Tage); wer ihn vorher kopiert hat, kommt damit noch hinein. |
+| 2 | Die Anwendung bleibt angemeldet und meldet, dass das Abmelden nicht geklappt hat; die Person kann es erneut versuchen. | Ein Zugang wird nur dann aus dem Browser entfernt, wenn er auf dem Server ungültig ist. Solange der Server fehlt, bleibt die Person auf diesem Gerät angemeldet; am geteilten Rechner muss sie warten oder den Browser-Speicher selbst leeren. |
+
+**Wahl (Person):** Vorschlag 2
+
 ### Vom Schreiber entschieden
 
 | Schritt | Was | Entscheidung | Warum |
@@ -191,6 +202,10 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | S3 | Ungültiger Zugang | Bei jeder Antwort 401, egal von welcher Anfrage, löscht `$api` den gespeicherten Zugang, leert die Person im Store und geht zur Anmeldeseite. | Ein Zugang kann ablaufen, während die Anwendung offen ist; sonst bliebe die Person im Store stehen, obwohl ihr Zugang nicht mehr gilt. |
 | S4 | Ziel nach der Anmeldung | Der Wächter hängt die gewünschte Seite als `redirect` an die Anmeldeseite; die Anmeldeseite folgt nur Pfaden, die mit genau einem `/` beginnen, sonst geht sie zu `/`. | Sonst ließe sich über einen Link zur Anmeldeseite auf eine fremde Adresse weiterleiten. |
 | S4 | Ziel bei 401 | Führt eine 401-Antwort zur Anmeldeseite, nimmt `$api` die aktuelle Seite als `redirect` mit. | Wer während der Arbeit abgemeldet wird, landet nach der Anmeldung wieder dort. |
+| S6 | Antwort von `logout` | 204 ohne Inhalt. | Es gibt nichts zurückzugeben; die Regel zur Hülle `data` gilt für Antworten mit Inhalt. |
+| S6 | Welcher Zugang endet | Nur der Zugang, mit dem die Anfrage kommt (`currentAccessToken()`). | Abnahme: Das Abmelden auf einem Gerät beendet die Anmeldung auf einem anderen nicht. |
+| S6 | Doppeltes und ungültiges Abmelden | Kein eigener Code: Ist der Zugang schon ungültig, antwortet `POST /logout` mit 401, und `$api` löscht Zugang und Person und geht zur Anmeldeseite. Der Knopf ist gesperrt, solange die Anfrage läuft. | Das Ergebnis ist dasselbe wie bei einem erfolgreichen Abmelden. |
+| S6 | Rate-Limit | `POST /logout` bekommt kein eigenes. | Die Route verlangt einen gültigen Zugang und beendet nur ihn selbst. |
 
 # Offene Punkte
 
@@ -206,3 +221,5 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 - S4 · Re-Review R4: Im Browser ungeprüft sind die Rückkehr mit Fragment (`#…`) und der Zurück-Knopf bei geleerter Person; Letzteres geht erst mit S6.
 - S4 · Re-Review N1: `new URL()` in `redirectTarget()` wirft bei einem ungültigen Ziel wie `/\[`; dann bleibt die Anmeldeseite stehen und meldet fälschlich „Server nicht erreichbar“.
 - S4 · Re-Review N2: Ein Ziel wie `/.//example.invalid` besteht die Origin-Prüfung, ergibt nach der Normalisierung aber `//example.invalid`; Nuxt bricht die Navigation ab. Auch das zusammengesetzte Ziel muss mit genau einem `/` beginnen.
+- S6 · Re-Review R1: Ein offen gebliebener Tab kann mit seinem Knopf „Abmelden“ den Zugang widerrufen, mit dem sich inzwischen eine andere Person in einem zweiten Tab angemeldet hat, weil `$api` den Zugang aus dem gemeinsamen `localStorage` liest; abgelehnt mit Verweis auf R3 aus S3, Codex sieht den Fall als eigenen.
+- S6 · Re-Review R2: Die Zeitgrenze von 5 Sekunden für `POST /logout` gilt nur bis zu den HTTP-Headern. Liefert ein Proxy Header und hält den Inhalt offen, bleibt „Abmelden“ gesperrt und die Meldung erscheint nicht (gleiche Ursache wie R2 aus S3).

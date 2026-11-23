@@ -45,9 +45,26 @@
             <span class="text-body-medium font-weight-medium text-truncate">{{ auth.user.name }}</span>
             <span class="text-body-small text-muted text-truncate">{{ auth.user.email }}</span>
           </div>
+          <v-btn
+            variant="text"
+            size="small"
+            icon
+            class="text-muted flex-shrink-0"
+            aria-label="Abmelden"
+            title="Abmelden"
+            :loading="loggingOut"
+            :disabled="loggingOut"
+            @click="logout"
+          >
+            <LogOut :size="16" />
+          </v-btn>
         </div>
       </template>
     </v-navigation-drawer>
+
+    <v-snackbar v-model="logoutFailed" color="error" :timeout="8000">
+      Abmelden hat nicht geklappt. Bitte versuche es erneut.
+    </v-snackbar>
 
     <v-app-bar flat height="56" color="background" class="border-b">
       <v-btn
@@ -88,7 +105,8 @@
 </template>
 
 <script setup lang="ts">
-import { BookOpenText, House, Moon, PanelLeft, Sun } from '@lucide/vue'
+import { BookOpenText, House, LogOut, Moon, PanelLeft, Sun } from '@lucide/vue'
+import { FetchError } from 'ofetch'
 import { useDisplay, useTheme } from 'vuetify'
 
 const NAV = [
@@ -102,6 +120,30 @@ const theme = useTheme()
 
 // null: Vuetify entscheidet nach Bildschirmbreite (Desktop offen, Mobil zu)
 const drawer = ref<boolean | null>(null)
+
+const loggingOut = ref(false)
+const logoutFailed = ref(false)
+
+// Bei 401 war der Zugang schon ungültig: $api löscht ihn und geht zur Anmeldeseite.
+// Jeder andere Fehler lässt die Person angemeldet, damit sie es erneut versuchen kann.
+async function logout() {
+  loggingOut.value = true
+  logoutFailed.value = false
+
+  try {
+    await auth.logout()
+    await navigateTo('/login')
+  }
+  catch (caught) {
+    const status = caught instanceof FetchError ? caught.response?.status : undefined
+    if (status !== 401) {
+      logoutFailed.value = true
+    }
+  }
+  finally {
+    loggingOut.value = false
+  }
+}
 
 const title = computed(() => (route.meta.title as string | undefined) ?? '')
 const isDark = computed(() => theme.global.current.value.dark)

@@ -7,6 +7,7 @@ use App\Http\Resources\UserResource;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
@@ -39,6 +40,17 @@ class AuthController extends Controller
         return JsonResource::make([
             'token' => $user->createToken('web', ['*'], now()->addMinutes(config('sanctum.expiration')))->plainTextToken,
         ]);
+    }
+
+    /**
+     * End the login on this device by deleting the token of this request.
+     * Tokens of other devices stay valid.
+     */
+    public function logout(Request $request): Response
+    {
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->noContent();
     }
 
     /**

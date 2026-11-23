@@ -7,6 +7,7 @@ use Laravel\Sanctum\PersonalAccessToken;
 
 const LOGIN_URL = '/api/v1/login';
 const USER_URL = '/api/v1/user';
+const LOGOUT_URL = '/api/v1/logout';
 const WRONG_CREDENTIALS = 'Die E-Mail-Adresse oder das Passwort ist falsch.';
 const PASSWORD_RULE = 'Das Passwort muss mindestens 8 Zeichen lang sein, Buchstaben und Ziffern enthalten und mit einem Großbuchstaben beginnen.';
 
@@ -226,6 +227,45 @@ describe('GET /api/v1/user', function () {
         $jana->tokens()->delete();
 
         $response = $this->withToken($token)->getJson(USER_URL);
+
+        $response->assertUnauthorized();
+    });
+});
+
+describe('POST /api/v1/logout', function () {
+    it('returns 204 and makes the token of this device unusable', function () {
+        $jana = User::factory()->create();
+        $token = $jana->createToken('laptop')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson(LOGOUT_URL);
+
+        $response->assertNoContent();
+        expect(userForToken($token))->toBeNull();
+    });
+
+    it('keeps the tokens of other devices', function () {
+        $jana = User::factory()->create();
+        $laptop = $jana->createToken('laptop')->plainTextToken;
+        $phone = $jana->createToken('phone')->plainTextToken;
+
+        $this->withToken($laptop)->postJson(LOGOUT_URL)->assertNoContent();
+
+        expect(userForToken($phone)?->is($jana))->toBeTrue()
+            ->and($jana->tokens()->count())->toBe(1);
+    });
+
+    it('returns 401 without a token', function () {
+        $response = $this->postJson(LOGOUT_URL);
+
+        $response->assertUnauthorized();
+    });
+
+    it('returns 401 for a token that was already logged out', function () {
+        $jana = User::factory()->create();
+        $token = $jana->createToken('laptop')->plainTextToken;
+        $jana->tokens()->delete();
+
+        $response = $this->withToken($token)->postJson(LOGOUT_URL);
 
         $response->assertUnauthorized();
     });
