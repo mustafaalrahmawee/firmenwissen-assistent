@@ -65,7 +65,7 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | S2 | `POST /api/v1/login` | Meldet die Person mit E-Mail und Passwort an und gibt ihr einen Zugang für dieses Gerät. | Anmeldeseite: Formular mit Vuetify-Regeln, Fehler am Feld, Meldung bei falschen Daten, Sperre und Serverausfall, danach Startseite | richtige Daten führen zur Startseite; falsche Daten mit Meldung ohne Hinweis auf bekannte Adressen; leere und ungültige Eingaben; Passwortregel; Sperre nach Fehlversuchen; doppelter Klick; Server nicht erreichbar | fertig |
 | S3 | `GET /api/v1/user` | Sagt der Anwendung, wer mit dem gespeicherten Zugang angemeldet ist. | Pinia-Store `auth` lädt die Person; Name und E-Mail in der Seitenleiste | zeigt, wer angemeldet ist; nach dem Neuladen weiterhin angemeldet; ungültig gewordene Anmeldung führt zur Anmeldeseite | fertig |
 | S4 | Middleware `auth` | Schickt Personen ohne Anmeldung von jeder geschützten Seite zur Anmeldeseite und nach der Anmeldung zurück. | Seitenwächter in `app/app/middleware/`, Anmeldeseite übernimmt das Ziel | geschützte Seite ohne Anmeldung; Rückkehr zur gewünschten Seite; Zurück-Knopf nach dem Abmelden | fertig |
-| S5 | Middleware `guest` | Schickt angemeldete Personen von der Anmeldeseite zur Startseite. | Seitenwächter in `app/app/middleware/` | angemeldete Person ruft die Anmeldeseite auf | offen – Code vorhanden |
+| S5 | Middleware `guest` | Schickt angemeldete Personen von der Anmeldeseite zur Startseite. | Seitenwächter in `app/app/middleware/` | angemeldete Person ruft die Anmeldeseite auf | fertig |
 | S6 | `POST /api/v1/logout` | Beendet die Anmeldung auf diesem Gerät. | Knopf „Abmelden“ in der Seitenleiste, danach Anmeldeseite | Abmelden wird angeboten; alter Zugang ungültig, auch aufbewahrt; andere Geräte bleiben angemeldet; doppeltes Abmelden und schon ungültige Anmeldung; Server nicht erreichbar | offen |
 
 **Nicht abgedeckt:** alles abgedeckt
@@ -159,6 +159,17 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | 2 | Der Wächter läuft global vor jeder Seite; nur Seiten, die als Gast-Seite markiert sind (heute die Anmeldeseite), nimmt er aus. | Eine neue Seite ist ohne weiteren Eintrag geschützt. Die Ausnahme steht an der Anmeldeseite; der Eintrag `middleware: 'auth'` an der Startseite fällt weg. |
 
 **Wahl (Person):** E8 Vorschlag 1
+
+### E9 · S5 · Wohin kommt eine angemeldete Person, die die Anmeldeseite aufruft?
+
+**Warum sich die Frage stellt:** Die Abnahme sagt „landet auf der Startseite“. Seit S4 kann die Anmeldeseite aber ein Ziel tragen (`/login?redirect=…`), zum Beispiel wenn der Server beim Start ausgefallen war und die Person nach dem Neuladen schon wieder angemeldet ist.
+
+| Vorschlag | Was gebaut würde | Was daraus folgt |
+| --- | --- | --- |
+| 1 | Immer zur Startseite. | Wie in der Abnahme. Ein Ziel in `?redirect=` geht verloren; die Person navigiert selbst weiter. Sehr wenig Code. |
+| 2 | Zum Ziel aus `?redirect=`, wenn es gültig ist, sonst zur Startseite. | Wer nach einem Serverausfall neu lädt, kommt dorthin zurück, wohin er wollte. Die Prüfung des Ziels aus `login.vue` muss dafür an einer gemeinsamen Stelle liegen, damit Wächter und Seite dieselbe Regel nutzen. Die Abnahme wird zu „landet auf der gewünschten Seite, sonst auf der Startseite“. |
+
+**Wahl (Person):** E9: Vorschlag 1
 
 ### Vom Schreiber entschieden
 
