@@ -11,6 +11,17 @@ export interface User {
   tenant: Tenant
 }
 
+export interface Registration {
+  name: string
+  company: string
+  email: string
+  password: string
+  password_confirmation: string
+}
+
+// Das Konto ist angelegt, aber danach ließ sich die Person nicht laden; ein neuer Versuch fände die Adresse vergeben
+export class AccountCreatedError extends Error {}
+
 const AUTH_REQUEST_TIMEOUT_MS = 5000
 
 export const useAuthStore = defineStore('auth', () => {
@@ -21,7 +32,27 @@ export const useAuthStore = defineStore('auth', () => {
       method: 'POST',
       body: { email, password },
     })
-    localStorage.setItem(TOKEN_KEY, data.token)
+    await storeTokenAndLoadUser(data.token)
+  }
+
+  // Legt Konto und Arbeitsbereich an; die Antwort ist schon ein Zugang für dieses Gerät
+  async function register(registration: Registration) {
+    const { data } = await $api<{ data: { token: string } }>('/register', {
+      method: 'POST',
+      body: registration,
+    })
+
+    try {
+      await storeTokenAndLoadUser(data.token)
+    }
+    catch (error) {
+      throw new AccountCreatedError('Konto angelegt, Anmeldung danach fehlgeschlagen', { cause: error })
+    }
+  }
+
+  // Zugang speichern und die Person laden; gelingt das nicht, bleibt kein halber Zustand zurück
+  async function storeTokenAndLoadUser(token: string) {
+    localStorage.setItem(TOKEN_KEY, token)
 
     try {
       await fetchUser()
@@ -49,5 +80,5 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
   }
 
-  return { user, login, fetchUser, logout, clear }
+  return { user, login, register, fetchUser, logout, clear }
 })

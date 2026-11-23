@@ -38,5 +38,10 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(5)
                 ->by(Str::lower(Str::ascii(is_string($email) ? $email : '')).'|'.$request->ip());
         });
+
+        RateLimiter::for('register', fn (Request $request): array => [
+            Limit::perMinute(5)->by('minute|'.$request->ip()),
+            Limit::perDay(20)->by('day|'.$request->ip()),
+        ]);
     }
 }

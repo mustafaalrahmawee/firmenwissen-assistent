@@ -110,7 +110,7 @@ it('ignores a workspace that the request names in the query, the body or a heade
 
 it('runs after auth:sanctum on every protected route of the API', function () {
     $protectedRoutes = collect(Route::getRoutes()->getRoutes())
-        ->filter(fn (Illuminate\Routing\Route $route): bool => str_starts_with($route->uri(), 'api/v1/') && $route->getName() !== 'v1.login');
+        ->filter(fn (Illuminate\Routing\Route $route): bool => str_starts_with($route->uri(), 'api/v1/') && ! in_array($route->getName(), ['v1.login', 'v1.register'], true));
 
     expect($protectedRoutes->map->getName())->toContain('v1.user', 'v1.logout');
 

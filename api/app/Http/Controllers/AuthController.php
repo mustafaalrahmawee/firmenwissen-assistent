@@ -3,11 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\LoginRequest;
+use App\Http\Requests\RegisterRequest;
 use App\Http\Resources\UserResource;
+use App\Models\Tenant;
 use App\Models\User;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
@@ -38,8 +43,40 @@ class AuthController extends Controller
         }
 
         return JsonResource::make([
-            'token' => $user->createToken('web', ['*'], now()->addMinutes(config('sanctum.expiration')))->plainTextToken,
+            'token' => $this->createDeviceToken($user),
         ]);
+    }
+
+    /**
+     * Create an account with a new workspace named after the company and log it in on this device.
+     *
+     * Workspace, account and token are created together or not at all. If another registration took
+     * the same address in the meantime, the unique index stops this one with the same answer
+     * as a taken address.
+     */
+    public function register(RegisterRequest $request): JsonResponse
+    {
+        $input = $request->validated();
+
+        try {
+            $token = DB::transaction(function () use ($input): string {
+                $user = new User([
+                    'name' => $input['name'],
+                    'email' => $input['email'],
+                    'password' => $input['password'],
+                ]);
+                $user->tenant()->associate(Tenant::create(['name' => $input['company']]));
+                $user->save();
+
+                return $this->createDeviceToken($user);
+            });
+        } catch (UniqueConstraintViolationException) {
+            throw ValidationException::withMessages(['email' => RegisterRequest::EMAIL_TAKEN]);
+        }
+
+        return JsonResource::make([
+            'token' => $token,
+        ])->response()->setStatusCode(201);
     }
 
     /**
@@ -59,5 +96,13 @@ class AuthController extends Controller
     public function user(Request $request): UserResource
     {
         return UserResource::make($request->user());
+    }
+
+    /**
+     * Issue a token for this device that expires after the configured lifetime.
+     */
+    private function createDeviceToken(User $user): string
+    {
+        return $user->createToken('web', ['*'], now()->addMinutes(config('sanctum.expiration')))->plainTextToken;
     }
 }

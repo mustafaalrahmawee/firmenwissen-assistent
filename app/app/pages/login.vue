@@ -43,6 +43,11 @@
         Anmelden
       </v-btn>
     </v-form>
+
+    <p class="text-body-medium text-muted text-center mt-6">
+      Noch kein Konto?
+      <NuxtLink to="/register" class="text-primary font-weight-medium">Registrieren</NuxtLink>
+    </p>
   </v-card>
 </template>
 

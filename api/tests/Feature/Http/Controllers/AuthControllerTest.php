@@ -4,11 +4,15 @@ use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\PersonalAccessToken;
 
 const LOGIN_URL = '/api/v1/login';
 const USER_URL = '/api/v1/user';
 const LOGOUT_URL = '/api/v1/logout';
+const REGISTER_URL = '/api/v1/register';
+const EMAIL_TAKEN = 'Zu dieser E-Mail-Adresse gibt es bereits ein Konto.';
 const WRONG_CREDENTIALS = 'Die E-Mail-Adresse oder das Passwort ist falsch.';
 const PASSWORD_RULE = 'Das Passwort muss mindestens 8 Zeichen lang sein, Buchstaben und Ziffern enthalten und mit einem Großbuchstaben beginnen.';
 
@@ -22,6 +26,24 @@ function userForToken(string $token): ?User
     return Auth::guard('sanctum')
         ->setRequest(Request::create('/', 'GET', server: ['HTTP_AUTHORIZATION' => "Bearer {$token}"]))
         ->user();
+}
+
+/**
+ * A valid registration of Carla Brandt, with single fields replaced.
+ *
+ * @param  array<string, mixed>  $overrides
+ * @return array<string, mixed>
+ */
+function registration(array $overrides = []): array
+{
+    return [
+        'name' => 'Carla Brandt',
+        'company' => 'Elbwerk Software GmbH',
+        'email' => 'carla.brandt@elbwerk.test',
+        'password' => 'Elbwerk2026',
+        'password_confirmation' => 'Elbwerk2026',
+        ...$overrides,
+    ];
 }
 
 describe('POST /api/v1/login', function () {
@@ -328,5 +350,295 @@ describe('POST /api/v1/logout', function () {
         $response = $this->withToken($token)->postJson(LOGOUT_URL);
 
         $response->assertUnauthorized();
+    });
+});
+
+describe('POST /api/v1/register', function () {
+    it('creates an account in a new workspace named after the company and returns a token for this device', function () {
+        $response = $this->postJson(REGISTER_URL, registration());
+
+        $response->assertCreated()->assertExactJsonStructure(['data' => ['token']]);
+        $user = User::sole();
+        expect($user->only('name', 'email'))->toBe(['name' => 'Carla Brandt', 'email' => 'carla.brandt@elbwerk.test'])
+            ->and(Hash::check('Elbwerk2026', $user->password))->toBeTrue()
+            ->and($user->tenant->name)->toBe('Elbwerk Software GmbH')
+            ->and(userForToken($response->json('data.token'))?->is($user))->toBeTrue();
+    });
+
+    it('shows the new workspace and nothing else to the new account', function () {
+        $token = $this->postJson(REGISTER_URL, registration())->json('data.token');
+
+        $response = $this->withToken($token)->getJson(USER_URL);
+
+        $response->assertOk()->assertExactJson(['data' => [
+            'id' => User::sole()->id,
+            'name' => 'Carla Brandt',
+            'email' => 'carla.brandt@elbwerk.test',
+            'tenant' => ['name' => 'Elbwerk Software GmbH'],
+        ]]);
+    });
+
+    it('lets the new account log in with the same data on another device', function () {
+        $this->postJson(REGISTER_URL, registration())->assertCreated();
+
+        $response = $this->postJson(LOGIN_URL, ['email' => 'carla.brandt@elbwerk.test', 'password' => 'Elbwerk2026']);
+
+        $response->assertOk();
+        expect(User::sole()->tokens()->count())->toBe(2);
+    });
+
+    it('issues a token that expires after seven days', function () {
+        $token = $this->postJson(REGISTER_URL, registration())->json('data.token');
+
+        $this->travel(7)->days();
+        $this->travel(-1)->minutes();
+        $stillValid = userForToken($token);
+        $this->travel(2)->minutes();
+        $expired = userForToken($token);
+
+        expect($stillValid)->not->toBeNull()
+            ->and($expired)->toBeNull();
+    });
+
+    it('never puts the new account into an existing workspace, even when the request names one', function () {
+        $nordlicht = Tenant::factory()->create(['name' => 'Nordlicht IT GmbH']);
+        User::factory()->for($nordlicht)->create(['email' => 'jana.petrov@nordlicht-it.test']);
+
+        $this->postJson(REGISTER_URL, registration([
+            'tenant_id' => $nordlicht->id,
+            'tenant' => ['id' => $nordlicht->id],
+        ]))->assertCreated();
+
+        $carla = User::firstWhere('email', 'carla.brandt@elbwerk.test');
+        expect($carla->tenant_id)->not->toBe($nordlicht->id)
+            ->and($carla->tenant->name)->toBe('Elbwerk Software GmbH')
+            ->and(Tenant::count())->toBe(2);
+    });
+
+    it('gives a second person of the same company a workspace of their own', function () {
+        $this->postJson(REGISTER_URL, registration())->assertCreated();
+
+        $this->postJson(REGISTER_URL, registration(['name' => 'Ole Brandt', 'email' => 'ole.brandt@elbwerk.test']))->assertCreated();
+
+        $carla = User::firstWhere('email', 'carla.brandt@elbwerk.test');
+        $ole = User::firstWhere('email', 'ole.brandt@elbwerk.test');
+        expect($ole->tenant_id)->not->toBe($carla->tenant_id)
+            ->and($ole->tenant->name)->toBe($carla->tenant->name);
+    });
+
+    it('returns 422 for a taken email address in any spelling of capitals and leaves the existing account as it was', function (string $email) {
+        $carla = User::factory()->create(['name' => 'Carla Brandt', 'email' => 'carla.brandt@elbwerk.test', 'password' => 'Elbwerk2026']);
+        $passwordHash = $carla->password;
+
+        $response = $this->postJson(REGISTER_URL, registration(['name' => 'Mehmet Aydin', 'email' => $email, 'password' => 'Hafenkante2026', 'password_confirmation' => 'Hafenkante2026']));
+
+        $response->assertUnprocessable()->assertJsonValidationErrors(['email' => EMAIL_TAKEN]);
+        expect(User::count())->toBe(1)
+            ->and(Tenant::count())->toBe(1)
+            ->and($carla->fresh()->only('name', 'email', 'password'))->toBe(['name' => 'Carla Brandt', 'email' => 'carla.brandt@elbwerk.test', 'password' => $passwordHash]);
+        $this->assertDatabaseEmpty('personal_access_tokens');
+    })->with([
+        'same spelling' => 'carla.brandt@elbwerk.test',
+        'capitals' => 'Carla.Brandt@Elbwerk.test',
+    ]);
+
+    it('returns 422 instead of 500 when another registration takes the address just before the account is saved', function () {
+        User::creating(function (User $user): void {
+            DB::table('users')->insert([
+                'tenant_id' => Tenant::factory()->create()->id,
+                'name' => 'Mehmet Aydin',
+                'email' => $user->email,
+                'password' => 'x',
+            ]);
+        });
+
+        $response = $this->postJson(REGISTER_URL, registration());
+
+        $response->assertUnprocessable()->assertJsonValidationErrors(['email' => EMAIL_TAKEN]);
+        $this->assertDatabaseEmpty('users');
+        $this->assertDatabaseEmpty('tenants');
+    });
+
+    it('leaves neither account nor workspace behind when the token cannot be saved', function () {
+        PersonalAccessToken::creating(fn () => throw new RuntimeException('Datenbank weg'));
+
+        $response = $this->postJson(REGISTER_URL, registration());
+
+        $response->assertServerError();
+        $this->assertDatabaseEmpty('personal_access_tokens');
+        $this->assertDatabaseEmpty('users');
+        $this->assertDatabaseEmpty('tenants');
+    });
+
+    it('leaves no workspace behind when the account cannot be saved', function () {
+        User::creating(fn () => throw new RuntimeException('Datenbank weg'));
+
+        $response = $this->postJson(REGISTER_URL, registration());
+
+        $response->assertServerError();
+        $this->assertDatabaseEmpty('users');
+        $this->assertDatabaseEmpty('tenants');
+    });
+
+    it('returns 422 for an email address that starts with demo', function (string $email) {
+        $response = $this->postJson(REGISTER_URL, registration(['email' => $email]));
+
+        $response->assertUnprocessable()->assertJsonValidationErrors(['email' => 'E-Mail-Adressen, die mit „demo“ beginnen, sind für den Demo-Zugang reserviert.']);
+        $this->assertDatabaseEmpty('users');
+        $this->assertDatabaseEmpty('tenants');
+    })->with([
+        'address of the demo account' => 'demo@firmenwissen.test',
+        'capitals' => 'Demo.Team@elbwerk.test',
+        'longer word' => 'demokrit@elbwerk.test',
+        'accent' => 'démo@elbwerk.test',
+    ]);
+
+    it('keeps the demo account working next to registered accounts', function () {
+        $this->postJson(REGISTER_URL, registration(['email' => 'demo@firmenwissen.test']))->assertUnprocessable();
+        $this->postJson(REGISTER_URL, registration())->assertCreated();
+
+        $this->artisan('app:create-demo-user')->assertSuccessful();
+        $this->artisan('app:create-demo-user')->assertSuccessful();
+
+        $demo = User::firstWhere('email', 'demo@firmenwissen.test');
+        $carla = User::firstWhere('email', 'carla.brandt@elbwerk.test');
+        expect(User::count())->toBe(2)
+            ->and($demo->tenant_id)->not->toBe($carla->tenant_id)
+            ->and($carla->tenant->name)->toBe('Elbwerk Software GmbH');
+        $this->postJson(LOGIN_URL, ['email' => 'demo@firmenwissen.test', 'password' => 'Demo2026'])->assertOk();
+    });
+
+    it('returns 422 naming the password rule for a password that breaks it', function (string $password) {
+        $response = $this->postJson(REGISTER_URL, registration(['password' => $password, 'password_confirmation' => $password]));
+
+        $response->assertUnprocessable();
+        expect($response->json('errors.password'))->toBe([PASSWORD_RULE]);
+        $this->assertDatabaseEmpty('users');
+    })->with([
+        'too short' => 'Elbe26',
+        'without digit' => 'Elbwerk',
+        'lowercase first letter' => 'elbwerk2026',
+        'without letter' => '12345678',
+    ]);
+
+    it('returns 422 when the repeated password differs or is missing', function (array $overrides) {
+        $response = $this->postJson(REGISTER_URL, registration($overrides));
+
+        $response->assertUnprocessable()->assertJsonValidationErrors(['password' => 'Die beiden Passwörter stimmen nicht überein.']);
+        $this->assertDatabaseEmpty('users');
+    })->with([
+        'typo' => [['password_confirmation' => 'Elbwerk2062']],
+        'missing' => [['password_confirmation' => null]],
+    ]);
+
+    it('returns 422 for a password with a null character', function () {
+        $password = "Elbwerk2026\0";
+
+        $response = $this->postJson(REGISTER_URL, registration(['password' => $password, 'password_confirmation' => $password]));
+
+        $response->assertUnprocessable()->assertJsonValidationErrors(['password' => 'Das Passwort darf kein Nullzeichen enthalten.']);
+        $this->assertDatabaseEmpty('users');
+        $this->assertDatabaseEmpty('tenants');
+    });
+
+    it('returns 422 for a password longer than 72 bytes', function () {
+        $password = 'Elbwerk2026'.str_repeat('ä', 31);
+
+        $response = $this->postJson(REGISTER_URL, registration(['password' => $password, 'password_confirmation' => $password]));
+
+        $response->assertUnprocessable()->assertJsonValidationErrors([
+            'password' => 'Das Passwort ist zu lang. Erlaubt sind 72 Byte: 72 Zeichen ohne Umlaute und Sonderzeichen, mit ihnen weniger.',
+        ]);
+        expect(mb_strlen($password))->toBe(42)
+            ->and(strlen($password))->toBe(73);
+        $this->assertDatabaseEmpty('users');
+    });
+
+    it('accepts a password of exactly 72 bytes', function () {
+        $password = 'Elbwerk2026'.str_repeat('a', 61);
+
+        $this->postJson(REGISTER_URL, registration(['password' => $password, 'password_confirmation' => $password]))->assertCreated();
+
+        expect(Hash::check($password, User::sole()->password))->toBeTrue();
+    });
+
+    it('returns 422 with a field error for missing or malformed input', function (array $overrides, string $field, string $message) {
+        $response = $this->postJson(REGISTER_URL, registration($overrides));
+
+        $response->assertUnprocessable()->assertJsonValidationErrors([$field => $message]);
+        $this->assertDatabaseEmpty('users');
+        $this->assertDatabaseEmpty('tenants');
+    })->with([
+        'missing name' => [['name' => null], 'name', 'Bitte gib deinen Namen ein.'],
+        'blank name' => [['name' => '   '], 'name', 'Bitte gib deinen Namen ein.'],
+        'name too long' => [['name' => str_repeat('a', 256)], 'name', 'Der Name darf höchstens 255 Zeichen lang sein.'],
+        'missing company' => [['company' => null], 'company', 'Bitte gib den Namen deiner Firma ein.'],
+        'company as a list' => [['company' => ['Elbwerk']], 'company', 'Bitte gib den Namen deiner Firma ein.'],
+        'company too long' => [['company' => str_repeat('a', 256)], 'company', 'Der Name der Firma darf höchstens 255 Zeichen lang sein.'],
+        'missing email address' => [['email' => null], 'email', 'Bitte gib deine E-Mail-Adresse ein.'],
+        'malformed email address' => [['email' => 'carla.brandt'], 'email', 'Bitte gib eine gültige E-Mail-Adresse ein.'],
+        'email address as a list' => [['email' => ['carla.brandt@elbwerk.test']], 'email', 'Bitte gib eine gültige E-Mail-Adresse ein.'],
+        'missing password' => [['password' => null], 'password', 'Bitte gib ein Passwort ein.'],
+    ]);
+
+    it('returns 429 after five registrations within a minute from the same IP address', function () {
+        foreach (range(1, 5) as $attempt) {
+            $this->postJson(REGISTER_URL, registration(['email' => "person{$attempt}@elbwerk.test"]))->assertCreated();
+        }
+
+        $response = $this->postJson(REGISTER_URL, registration(['email' => 'person6@elbwerk.test']));
+
+        $response->assertTooManyRequests()->assertHeader('Retry-After');
+        expect(User::count())->toBe(5);
+    });
+
+    it('counts requests with an invalid field towards the limit', function () {
+        foreach (range(1, 5) as $attempt) {
+            $this->postJson(REGISTER_URL, registration(['email' => 'carla.brandt']))->assertUnprocessable();
+        }
+
+        $this->postJson(REGISTER_URL, registration())->assertTooManyRequests();
+        $this->assertDatabaseEmpty('users');
+    });
+
+    it('does not limit another IP address', function () {
+        foreach (range(1, 5) as $attempt) {
+            $this->postJson(REGISTER_URL, registration(['email' => 'carla.brandt']));
+        }
+
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.2'])->postJson(REGISTER_URL, registration());
+
+        $response->assertCreated();
+    });
+
+    it('returns 429 after twenty registrations within a day from the same IP address', function () {
+        foreach (range(1, 4) as $minute) {
+            foreach (range(1, 5) as $attempt) {
+                $this->postJson(REGISTER_URL, registration(['email' => 'carla.brandt']))->assertUnprocessable();
+            }
+            $this->travel(61)->seconds();
+        }
+
+        $response = $this->postJson(REGISTER_URL, registration());
+
+        $response->assertTooManyRequests();
+        expect((int) $response->headers->get('Retry-After'))->toBeGreaterThan(60);
+        $this->assertDatabaseEmpty('users');
+
+        $this->travel(1)->days();
+        $this->postJson(REGISTER_URL, registration())->assertCreated();
+    });
+
+    it('counts requests turned away by the minute limit towards the day', function () {
+        foreach (range(1, 20) as $attempt) {
+            $this->postJson(REGISTER_URL, registration(['email' => 'carla.brandt']));
+        }
+
+        $this->travel(61)->seconds();
+        $response = $this->postJson(REGISTER_URL, registration());
+
+        $response->assertTooManyRequests();
+        expect((int) $response->headers->get('Retry-After'))->toBeGreaterThan(60);
+        $this->assertDatabaseEmpty('users');
     });
 });
