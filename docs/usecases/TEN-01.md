@@ -2,8 +2,8 @@
 
 - **Use Case:** TEN-01, Arbeitsbereich: jeder Nutzer gehört zu einem Tenant, Daten strikt getrennt, MVP (Woche 1)
 - **Baut auf:** AUTH-01
-- **Status:** Schritte
-- **Code:**
+- **Status:** fertig
+- **Code:** `api/app/Models/Tenant.php`, `api/database/migrations/2026_11_23_081339_create_tenants_table.php`, `api/database/migrations/2026_11_23_081341_add_tenant_id_to_users_table.php`, `api/app/Console/Commands/CreateDemoUser.php`, `api/app/Http/Resources/TenantResource.php`, `api/app/Http/Resources/UserResource.php`, `api/app/Http/CurrentTenant.php`, `api/app/Http/Middleware/SetCurrentTenant.php`, `api/bootstrap/app.php`, `api/routes/api.php`, `api/tests/Feature/Http/Middleware/SetCurrentTenantTest.php`, `app/app/stores/auth.ts`, `app/app/layouts/auth.vue`
 
 Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten er gebaut wird (ein Schritt ist ein Endpunkt) und was dafür entschieden wurde. Alles mit dem Vermerk `Person` schreibt die Person selbst; der Schreiber trägt es wortgleich ein.
 
@@ -56,7 +56,7 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | --- | --- | --- | --- | --- | --- |
 | S1 | Befehl `app:create-demo-user` (erweitert) | Legt mit dem Demo-Zugang auch den Demo-Arbeitsbereich an und ordnet ihm den Zugang zu; ab jetzt gehört jedes Konto zu genau einem Arbeitsbereich. | entfällt – läuft im Terminal | genau ein Arbeitsbereich je Konto, kein neues und kein bestehendes Konto ohne; Demo-Zugang im Demo-Arbeitsbereich ohne Handarbeit; zweiter oder gleichzeitiger Lauf ergibt keinen zweiten Demo-Arbeitsbereich; Kennung ändert sich nie; gleiche Namen bleiben getrennt | fertig |
 | S2 | `GET /api/v1/user` (erweitert) | Sagt der Anwendung zusätzlich, in welchem Arbeitsbereich die angemeldete Person arbeitet. | Name des Arbeitsbereichs in der Seitenleiste | Anwendung zeigt den Arbeitsbereich; gleiche Firma sieht denselben, andere Firma nur ihren eigenen; auf jedem Gerät derselbe; ein anderer Arbeitsbereich in der Anfrage ändert nichts; Server nicht erreichbar wie in AUTH-01, kein leerer Arbeitsbereich | fertig |
-| S3 | Middleware `tenant` | Legt für jede geschützte Anfrage den Arbeitsbereich allein aus der Anmeldung fest und beschränkt die Daten darauf; Fremdes sieht aus wie nicht vorhanden. | entfällt – wirkt nur im Server, erste Nutzer sind DOC-01 und folgende | Arbeitsbereich allein aus der Anmeldung, Angabe in der Anfrage wird nicht beachtet; Fremdes ergibt dieselbe Antwort wie Nicht-Vorhandenes; einheitlicher Weg für spätere Teile, damit keiner die Einschränkung vergisst, mit Test, der Fremdes ausschließt | offen |
+| S3 | Middleware `tenant` | Legt für jede geschützte Anfrage den Arbeitsbereich allein aus der Anmeldung fest und beschränkt die Daten darauf; Fremdes sieht aus wie nicht vorhanden. | entfällt – wirkt nur im Server, erste Nutzer sind DOC-01 und folgende | Arbeitsbereich allein aus der Anmeldung, Angabe in der Anfrage wird nicht beachtet; Fremdes ergibt dieselbe Antwort wie Nicht-Vorhandenes; einheitlicher Weg für spätere Teile, damit keiner die Einschränkung vergisst, mit Test, der Fremdes ausschließt | fertig |
 
 **Nicht abgedeckt:** Der Fall „Suchindex nicht erreichbar oder kennt den Arbeitsbereich noch nicht“ und die zweite Hälfte von „Unter derselben Kennung liegen später seine Inhalte im Suchindex“. In TEN-01 gibt es noch keinen Suchindex; beides gehört zu DOC-02 (Indexieren) und RAG-01 (Suchen). TEN-01 sorgt nur für die unveränderliche Kennung (S1).
 
@@ -96,6 +96,30 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 
 **Wahl (Person):** E3 Vorschlag 1
 
+### E4 · S3 · Wie beschränken spätere Teile ihre Daten auf den Arbeitsbereich?
+
+**Warum sich die Frage stellt:** Später kommen Dokumente, Textstücke, Chats und Zugänge für KI-Clients dazu, jeweils mit Arbeitsbereich. Es soll einen einheitlichen Weg geben, damit kein Teil die Einschränkung vergisst, und Fremdes soll dieselbe Antwort ergeben wie etwas, das es nicht gibt.
+
+| Vorschlag | Was gebaut würde | Was daraus folgt |
+| --- | --- | --- |
+| 1 | Ein globaler Scope: Jedes Modell mit Arbeitsbereich bekommt ein Trait. Jede Eloquent-Abfrage filtert dann von selbst auf den aktuellen Arbeitsbereich, und neue Datensätze bekommen ihn von selbst. | Ein Controller kann die Einschränkung nicht vergessen; ein fremder Datensatz in der Adresse ergibt ohne weiteren Code 404. Ohne aktuellen Arbeitsbereich (Befehl, Job) wirft die Abfrage einen Fehler, statt alles zu liefern; dort muss der Code einen Arbeitsbereich setzen oder den Scope bewusst abschalten. Abfragen an Eloquent vorbei (`DB::table`, Weaviate) filtert er nicht. Die Wirkung steht nicht in der Abfrage selbst, das ist beim Lesen und bei der Fehlersuche weniger sichtbar. |
+| 2 | Ausdrücklich über die Beziehung: Jede Abfrage geht vom aktuellen Arbeitsbereich aus, zum Beispiel `$tenant->documents()->findOrFail($id)`; die Middleware stellt den aktuellen Arbeitsbereich dafür bereit. | Die Einschränkung steht sichtbar in jeder Abfrage, ohne versteckte Wirkung in Befehlen und Jobs. Schreibt ein Controller `Document::find($id)`, gibt es keinen Schutz; das fällt nur im Review oder in einem Test auf. Deshalb braucht jeder spätere Endpunkt einen eigenen Test mit einem fremden Datensatz. |
+
+**Wahl (Person):** E4 Vorschlag 2
+
+**Hinweis des Schreibers:** S3 soll laut Schnitt auch den Fall „Ein späterer Teil der Anwendung vergisst, auf den eigenen Arbeitsbereich einzuschränken“ abdecken. Mit Vorschlag 2 verhindert das kein Code: Schreibt ein späterer Controller `Document::findOrFail($id)` statt über den aktuellen Arbeitsbereich zu suchen, bekommt Mehmet mit der Nummer eines Dokuments der Nordlicht IT GmbH dieses Dokument. Abgesichert ist der Fall dann nur durch einen Test mit fremdem Datensatz in jedem späteren Endpunkt.
+
+### E5 · S3 · Wie kommt die Middleware an die geschützten Routen?
+
+**Warum sich die Frage stellt:** Jede Anfrage, die Daten eines Arbeitsbereichs liest oder schreibt, braucht den aktuellen Arbeitsbereich. Heute gibt es nur `GET /user` und `POST /logout`, später viele Routen für Dokumente, Chat und Auswertung.
+
+| Vorschlag | Was gebaut würde | Was daraus folgt |
+| --- | --- | --- |
+| 1 | Die Middleware hängt an der ganzen Gruppe `auth:sanctum` in `routes/api.php`. | Jede neue geschützte Route hat sie ohne weiteren Eintrag, auch `GET /user` und `POST /logout`, wo sie nichts ändert. Routen für KI-Clients (MCP-01) liegen voraussichtlich in einer eigenen Gruppe und brauchen sie dort ebenfalls. |
+| 2 | Jede Route oder Gruppe, die Daten eines Arbeitsbereichs braucht, nennt die Middleware selbst. | Man sieht an jeder Route, dass sie einen Arbeitsbereich braucht. Vergisst eine neue Route den Eintrag, fehlt der aktuelle Arbeitsbereich: Mit E4 · 1 wirft die erste Abfrage einen Fehler (500), mit E4 · 2 bekommt der Controller keinen Arbeitsbereich. |
+
+**Wahl (Person):** E5 Vorschalg 1
+
 ### Vom Schreiber entschieden
 
 | Schritt | Was | Entscheidung | Warum |
@@ -110,7 +134,12 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | S2 | Antwort | `tenant` als Objekt mit nur `name` (eigene API Resource), keine Kennung. | Die Seitenleiste braucht nur den Namen; die ULID ist der Name im Suchindex und bleibt im Server. Weitere Felder kommen später ohne Bruch dazu. |
 | S2 | Herkunft | Der Arbeitsbereich kommt nur über die Beziehung des angemeldeten Kontos; Abfrageparameter und Inhalt der Anfrage werden nicht gelesen. | Regel aus `CLAUDE.md`; ein Test schickt einen fremden Arbeitsbereich mit. |
 | S2 | Ort in der Oberfläche | Name des Arbeitsbereichs als zweite Zeile unter „Firmenwissen“ im Kopf der Seitenleiste, gekürzt mit vollem Namen als Tooltip. | Der Arbeitsbereich gilt für die ganze Anwendung, nicht nur für die Person; der Kopf ist auf jeder Seite sichtbar. |
+| S3 | Quelle | Die Middleware nimmt den Arbeitsbereich nur aus dem angemeldeten Konto; Inhalt, Abfrageparameter und Header der Anfrage liest sie nicht. Die Quelle Token für KI-Clients ergänzt MCP-01. | Regel aus `CLAUDE.md`; das Beispiel mit Header aus den Laravel-Regeln wird nicht übernommen. |
+| S3 | Ablage | Der aktuelle Arbeitsbereich liegt nur für die laufende Anfrage im Container. Wie ein Job den Arbeitsbereich bekommt, entscheidet DOC-02. | Ein Schritt baut nichts für einen späteren; ein weitergereichter Wert in Jobs wäre eine Entscheidung von DOC-02. |
+| S3 | Reihenfolge | Die Middleware läuft nach `auth:sanctum`; ohne Anmeldung antwortet schon diese mit 401. | Kein zweiter Weg für fehlende Anmeldung. |
+| S3 | Tests | Geprüft wird mit einer Route und einem Modell samt Tabelle, die es nur im Test gibt. | In TEN-01 gibt es außer den Konten noch keine Daten mit Arbeitsbereich. |
 
 # Offene Punkte
 
 - S1 · Re-Review R3: Zwei wirklich gleichzeitige erste Läufe von `app:create-demo-user` sind nicht getestet. Der Test löst die Kollision der E-Mail-Adresse nur in derselben Transaktion aus (SQLite im Speicher, eine Verbindung); dass am Ende genau ein Demo-Zugang in genau seinem Arbeitsbereich bleibt, ließe sich nur mit zwei Verbindungen auf MySQL prüfen.
+- S3 · Review R2: Mit E4 · 2 schützt kein Code vor einer Abfrage am aktuellen Arbeitsbereich vorbei. Jeder spätere Endpunkt mit Daten eines Arbeitsbereichs (ab DOC-01) braucht deshalb einen Test, der einen vorhandenen fremden Datensatz mit einem fehlenden vergleicht.
