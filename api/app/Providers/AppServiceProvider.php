@@ -43,5 +43,10 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(5)->by('minute|'.$request->ip()),
             Limit::perDay(20)->by('day|'.$request->ip()),
         ]);
+
+        RateLimiter::for('documents', fn (Request $request): array => [
+            Limit::perMinute(30)->by('minute|'.$request->user()->id),
+            Limit::perDay(200)->by('day|'.$request->user()->id),
+        ]);
     }
 }

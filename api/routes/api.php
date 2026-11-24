@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DocumentController;
 use App\Http\Middleware\ThrottleEveryRequest;
 use Illuminate\Support\Facades\Route;
 
@@ -11,5 +12,7 @@ Route::prefix('v1')->name('v1.')->group(function () {
     Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
         Route::get('user', [AuthController::class, 'user'])->name('user');
         Route::post('logout', [AuthController::class, 'logout'])->name('logout');
+
+        Route::post('documents', [DocumentController::class, 'store'])->middleware(ThrottleEveryRequest::class.':documents')->name('documents.store');
     });
 });
