@@ -119,12 +119,13 @@
 </template>
 
 <script setup lang="ts">
-import { BookOpenText, House, LogOut, Moon, PanelLeft, Sun } from '@lucide/vue'
+import { BookOpenText, FileText, House, LogOut, Moon, PanelLeft, Sun } from '@lucide/vue'
 import { FetchError } from 'ofetch'
 import { useDisplay, useTheme } from 'vuetify'
 
 const NAV = [
   { to: '/', label: 'Start', icon: House },
+  { to: '/documents', label: 'Dokumente', icon: FileText },
 ]
 
 const auth = useAuthStore()
