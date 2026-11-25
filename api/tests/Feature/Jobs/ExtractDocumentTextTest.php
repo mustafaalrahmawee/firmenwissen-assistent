@@ -5,6 +5,9 @@ use App\Enums\DocumentStatus;
 use App\Http\CurrentTenant;
 use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
+use App\Models\DocumentPage;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
@@ -101,5 +104,77 @@ describe('ExtractDocumentText', function () {
 
         expect($nordlicht->pages()->pluck('text')->all())->toBe(["# Neue Laptops\n"])
             ->and($hafenkante->pages()->pluck('text')->all())->toBe(["# Angebot Hafenkante\n"]);
+    });
+
+    it('keeps every page once when it runs a second time', function () {
+        $document = documentWithFile(DocumentFormat::Pdf, file_get_contents(fixture('documents/betriebshandbuch-vpn.pdf')));
+
+        ExtractDocumentText::dispatchSync($document);
+        ExtractDocumentText::dispatchSync($document);
+
+        expect($document->pages()->orderBy('page')->pluck('page')->all())->toBe([1, 2, 3]);
+    });
+
+    it('replaces pages of an earlier run, also those the new text no longer has', function () {
+        $document = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
+        $document->pages()->createMany([
+            ['page' => 1, 'text' => 'alter Text'],
+            ['page' => 2, 'text' => 'alte zweite Seite'],
+        ]);
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect($document->pages()->pluck('text', 'page')->all())->toBe([1 => "# Neue Laptops\n"]);
+    });
+
+    it('leaves the pages of an earlier run whole when saving the new ones fails', function () {
+        $document = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
+        $document->pages()->createMany([
+            ['page' => 1, 'text' => 'alter Text'],
+            ['page' => 2, 'text' => 'alte zweite Seite'],
+        ]);
+        DocumentPage::creating(fn () => throw new RuntimeException('Datenbank weg'));
+
+        expect(fn () => ExtractDocumentText::dispatchSync($document))->toThrow(RuntimeException::class, 'Datenbank weg');
+
+        expect($document->pages()->pluck('text', 'page')->all())->toBe([1 => 'alter Text', 2 => 'alte zweite Seite']);
+    });
+
+    it('drops a run for a document another run is working on and changes nothing', function () {
+        $document = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
+        $job = new ExtractDocumentText($document);
+        $lock = Cache::lock((new WithoutOverlapping($document->id))->getLockKey($job), 60);
+        expect($lock->get())->toBeTrue();
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect($document->pages()->count())->toBe(0)
+            ->and($document->fresh()->status)->toBe(DocumentStatus::Pending);
+
+        $lock->release();
+        ExtractDocumentText::dispatchSync($document);
+
+        expect($document->pages()->count())->toBe(1);
+    });
+
+    it('lets the lock of a dead run expire after the timeout and before the queue hands out the job again', function () {
+        $document = Document::factory()->create();
+        $job = new ExtractDocumentText($document);
+        $lock = $job->middleware()[0];
+
+        expect($lock->expiresAfter)->toBe(ExtractDocumentText::LOCK_SECONDS)
+            ->and($job->timeout)->toBeLessThan($lock->expiresAfter)
+            ->and($lock->expiresAfter)->toBeLessThan(config('queue.connections.database.retry_after'));
+    });
+
+    it('lets runs for other documents go on while one document is locked', function () {
+        $locked = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
+        $other = documentWithFile(DocumentFormat::Markdown, "# Angebot\n");
+        $job = new ExtractDocumentText($locked);
+        Cache::lock((new WithoutOverlapping($locked->id))->getLockKey($job), 60)->get();
+
+        ExtractDocumentText::dispatchSync($other);
+
+        expect($other->pages()->count())->toBe(1);
     });
 });
