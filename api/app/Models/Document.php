@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * An uploaded file of a workspace. The file lies unchanged on the local disk under "path";
@@ -57,6 +58,16 @@ class Document extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * The text of the document, page by page.
+     *
+     * @return HasMany<DocumentPage, $this>
+     */
+    public function pages(): HasMany
+    {
+        return $this->hasMany(DocumentPage::class);
     }
 
     /**
