@@ -15,7 +15,7 @@ beforeEach(function () {
  */
 function documentWithFile(DocumentFormat $format, string $content): Document
 {
-    $document = Document::factory()->create(['format' => $format]);
+    $document = Document::factory()->create(['format' => $format, 'sha256' => hash('sha256', $content)]);
     $document->update(['path' => preg_replace('/\.\w+$/', '.'.$format->extension(), $document->path)]);
     Storage::disk('local')->put($document->path, $content);
 
@@ -33,6 +33,20 @@ describe('ExtractDocumentText', function () {
             2 => '',
             3 => "Störungen\nBei Ausfall des Gateways die Bereitschaft anrufen.\n\n",
         ]);
+    });
+
+    it('keeps the text in MySQL and leaves the file unchanged on the disk', function () {
+        $content = file_get_contents(fixture('documents/betriebshandbuch-vpn.pdf'));
+        $document = documentWithFile(DocumentFormat::Pdf, $content);
+
+        ExtractDocumentText::dispatchSync($document);
+
+        $stored = Document::findOrFail($document->id);
+        $file = Storage::disk('local')->get($stored->path);
+
+        expect($stored->pages()->orderBy('page')->pluck('page')->all())->toBe([1, 2, 3])
+            ->and($file)->toBe($content)
+            ->and(hash('sha256', $file))->toBe($stored->sha256);
     });
 
     it('keeps a Markdown file as page 1, cleaned, with its headings', function () {
