@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\DocumentFormat;
+use App\Enums\DocumentStatus;
 use App\Models\Document;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -28,6 +29,9 @@ class ExtractDocumentText implements ShouldQueue
 
     public function handle(): void
     {
+        $this->document->status = DocumentStatus::Processing;
+        $this->document->save();
+
         $pages = collect($this->readPages())
             ->map($this->clean(...))
             ->map(fn (string $text, int $index): array => ['page' => $index + 1, 'text' => $text]);

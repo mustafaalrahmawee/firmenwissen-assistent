@@ -1,11 +1,14 @@
 <?php
 
+use App\Enums\DocumentStatus;
+use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -20,6 +23,7 @@ const WRONG_FORMAT = 'Erlaubt sind nur PDF- und Markdown-Dateien (.pdf, .md, .ma
 
 beforeEach(function () {
     Storage::fake('local');
+    Queue::fake();
 });
 
 /**
@@ -409,15 +413,40 @@ describe('POST /api/v1/documents', function () {
             ->once();
     });
 
-    it('accepts the upload without calling the services for processing and search', function () {
+    it('accepts the upload without calling the services for processing and search and queues the processing of the saved document', function () {
         Http::preventStrayRequests();
-        Queue::fake();
         janaLoggedIn();
 
         $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')]);
 
         $response->assertCreated();
+        $document = Document::sole();
+        expect($document->id)->toBe($response->json('data.id'))
+            ->and($document->status)->toBe(DocumentStatus::Pending)
+            ->and($document->pages()->count())->toBe(0);
+        Queue::assertPushed(ExtractDocumentText::class, 1);
+        Queue::assertPushed(ExtractDocumentText::class, fn (ExtractDocumentText $job) => $job->document->is($document));
+    });
+
+    it('queues nothing for a rejected upload', function () {
+        janaLoggedIn();
+
+        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Angebot.docx', 'Angebot')])->assertUnprocessable();
+
         Queue::assertNothingPushed();
+    });
+
+    it('accepts the upload and reports the error when the processing cannot be queued, the document stays pending', function () {
+        Exceptions::fake();
+        Queue::shouldReceive('connection')->andThrow(new RuntimeException('Warteschlange nicht erreichbar'));
+        janaLoggedIn();
+
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Angebot.md', '# Angebot')]);
+
+        $response->assertCreated();
+        expect(Document::sole()->status)->toBe(DocumentStatus::Pending);
+        Storage::disk('local')->assertExists(Document::sole()->path);
+        Exceptions::assertReported(fn (RuntimeException $exception) => $exception->getMessage() === 'Warteschlange nicht erreichbar');
     });
 
     it('returns 429 after thirty uploads within a minute from the same account', function () {

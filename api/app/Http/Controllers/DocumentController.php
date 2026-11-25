@@ -6,6 +6,7 @@ use App\Enums\DocumentFormat;
 use App\Http\CurrentTenant;
 use App\Http\Requests\StoreDocumentRequest;
 use App\Http\Resources\DocumentResource;
+use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
@@ -19,6 +20,8 @@ class DocumentController extends Controller
      * Store the file unchanged and record it as a document of the current workspace.
      * If anything fails, the file is removed again. The same content twice in one workspace
      * is stopped by the unique index. A name longer than 255 characters is shortened.
+     * Once the document is saved, its processing is queued; if queueing fails, it is
+     * reported and the upload still succeeds, the document stays pending.
      */
     public function store(StoreDocumentRequest $request, CurrentTenant $currentTenant): DocumentResource
     {
@@ -61,6 +64,10 @@ class DocumentController extends Controller
 
             throw $exception;
         }
+
+        rescue(function () use ($document): void {
+            ExtractDocumentText::dispatch($document);
+        });
 
         return DocumentResource::make($document);
     }

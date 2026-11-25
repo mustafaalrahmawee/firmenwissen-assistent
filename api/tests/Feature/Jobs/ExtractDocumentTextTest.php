@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\DocumentFormat;
+use App\Enums\DocumentStatus;
 use App\Http\CurrentTenant;
 use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
@@ -33,6 +34,15 @@ describe('ExtractDocumentText', function () {
             2 => '',
             3 => "Störungen\nBei Ausfall des Gateways die Bereitschaft anrufen.\n\n",
         ]);
+    });
+
+    it('moves the document from pending to processing when it starts', function () {
+        $document = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
+        expect($document->fresh()->status)->toBe(DocumentStatus::Pending);
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect($document->fresh()->status)->toBe(DocumentStatus::Processing);
     });
 
     it('keeps the text in MySQL and leaves the file unchanged on the disk', function () {

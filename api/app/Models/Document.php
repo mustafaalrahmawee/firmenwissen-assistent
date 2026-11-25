@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\DocumentFormat;
+use App\Enums\DocumentStatus;
 use Database\Factories\DocumentFactory;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -16,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * An uploaded file of a workspace. The file lies unchanged on the local disk under "path";
  * workspace and uploader are set only through their relations, never by mass assignment.
+ * The status starts as pending and is moved only by the processing.
  */
 #[Fillable(['name', 'format', 'size', 'sha256', 'path'])]
 #[Hidden(['sha256', 'path'])]
@@ -39,6 +41,7 @@ class Document extends Model
         return [
             'format' => DocumentFormat::class,
             'size' => 'integer',
+            'status' => DocumentStatus::class,
         ];
     }
 
