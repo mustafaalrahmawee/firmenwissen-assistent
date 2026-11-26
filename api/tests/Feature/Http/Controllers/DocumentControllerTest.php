@@ -507,7 +507,7 @@ describe('POST /api/v1/documents', function () {
 });
 
 describe('GET /api/v1/documents/{document}', function () {
-    it('returns a document of the workspace with its status and, once failed, its reason', function (DocumentStatus $status, ?string $reason) {
+    it('returns a document of the workspace with its status and, once failed, its reason', function (DocumentStatus $status, string $expectedStatus, ?string $reason) {
         $jana = janaLoggedIn();
         $document = Document::factory()->for($jana)->for($jana->tenant)->create([
             'name' => 'Betriebshandbuch VPN.pdf',
@@ -520,13 +520,13 @@ describe('GET /api/v1/documents/{document}', function () {
         $response->assertOk()
             ->assertJsonPath('data.id', $document->id)
             ->assertJsonPath('data.name', 'Betriebshandbuch VPN.pdf')
-            ->assertJsonPath('data.status', $status->value)
+            ->assertJsonPath('data.status', $expectedStatus)
             ->assertJsonPath('data.failure_reason', $reason);
         expect(array_keys($response->json('data')))->toBe(['id', 'name', 'format', 'size', 'status', 'failure_reason', 'created_at']);
     })->with([
-        'wartet' => [DocumentStatus::Pending, null],
-        'in Arbeit' => [DocumentStatus::Processing, null],
-        'gescheitert' => [DocumentStatus::Failed, 'Das PDF enthält keinen lesbaren Text. Vielleicht ist es ein Scan.'],
+        'wartet' => [DocumentStatus::Pending, 'pending', null],
+        'in Arbeit' => [DocumentStatus::Processing, 'processing', null],
+        'gescheitert' => [DocumentStatus::Failed, 'failed', 'Das PDF enthält keinen lesbaren Text. Vielleicht ist es ein Scan.'],
     ]);
 
     it('returns the status the processing has set since the upload', function () {
@@ -626,6 +626,8 @@ describe('GET /api/v1/documents/{document}', function () {
             ->assertCreated()
             ->json('data.id');
         $this->withToken($morningToken)->postJson('/api/v1/logout')->assertNoContent();
+        Auth::forgetGuards();
+        expect(Auth::guard('sanctum')->user())->toBeNull();
 
         Queue::pushed(ExtractDocumentText::class)->sole()->handle();
 
@@ -638,5 +640,22 @@ describe('GET /api/v1/documents/{document}', function () {
             ->getJson(DOCUMENTS_URL.'/'.$id)
             ->assertOk()
             ->assertJsonPath('data.status', 'processing');
+    });
+
+    it('answers an own id with trailing spaces like an unknown one, without looking it up', function () {
+        config(['app.debug' => false]);
+        $jana = janaLoggedIn();
+        $document = Document::factory()->for($jana)->for($jana->tenant)->create(['name' => 'Notizen Laptops.md']);
+        $unknownId = (string) Str::ulid();
+        $unknown = $this->getJson(DOCUMENTS_URL.'/'.$unknownId);
+        DB::enableQueryLog();
+
+        $padded = $this->getJson(DOCUMENTS_URL.'/'.rawurlencode($document->id.' '));
+
+        $padded->assertNotFound();
+        expect(str_replace(rawurlencode($document->id.' '), '{id}', str_replace($document->id.' ', '{id}', $padded->getContent())))
+            ->toBe(str_replace($unknownId, '{id}', $unknown->getContent()))
+            ->not->toContain('Notizen');
+        expect(collect(DB::getQueryLog())->pluck('query')->filter(fn (string $query) => str_contains($query, '"documents"')))->toBeEmpty();
     });
 });

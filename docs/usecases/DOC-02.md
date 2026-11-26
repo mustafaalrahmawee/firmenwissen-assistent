@@ -46,7 +46,7 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 - [ ] A9 · Ein vorübergehender Ausfall eines Dienstes lässt das Dokument nicht für immer scheitern: Es wird später durchsuchbar, ohne dass die Person es neu hochlädt.
 - [ ] A10 · Bricht die Verarbeitung mittendrin ab oder läuft sie zweimal, gibt es am Ende jedes Textstück genau einmal, in den eigenen Daten und im Suchindex.
 - [x] A11 · Viele Dokumente auf einmal werden nacheinander abgearbeitet; keines geht verloren, und ein gescheitertes hält die anderen nicht auf.
-- [ ] A12 · Den Stand eines Dokuments sieht nur, wer zu seinem Arbeitsbereich gehört. Ein fremdes Dokument sieht aus wie eines, das es nicht gibt.
+- [x] A12 · Den Stand eines Dokuments sieht nur, wer zu seinem Arbeitsbereich gehört. Ein fremdes Dokument sieht aus wie eines, das es nicht gibt.
 - [ ] A13 · Dokumente, die vor diesem Use Case hochgeladen wurden, bleiben nicht für immer unverarbeitet.
 
 **Nicht Teil:** Die Liste aller Dokumente und die Ansicht des Textes gehören zu DOC-03. Suchen in den Textstücken gehört zu RAG-01, Fragen im Chat zu CHAT-01, der Zugang für KI-Clients zu MCP-01 und MCP-02. Den ganzen Suchindex neu aufbauen, auch nach einem Wechsel des Modells, gehört zu SYS-01; die Güte der Textstücke messen zu EVAL-01. Text aus Scans erkennen (OCR), Kennwörter für geschützte PDFs, Bilder und Tabellen auswerten, weitere Formate. Dokumente löschen oder ersetzen. Die vorgeladenen Beispieldokumente der Live-Demo.
@@ -67,7 +67,7 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | Nr | Schritt | Was er tut | Oberfläche | Deckt ab | Anchor | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | S1 | Job `ExtractDocumentText` | Liest nach dem Hochladen von selbst im Hintergrund den Text aus dem PDF oder der Markdown-Datei und hält ihn fest; ohne lesbaren Text scheitert das Dokument mit einem Grund. | entfällt – läuft im Hintergrund; den Stand zeigt S2 | A1; A3 Text aus PDF und Markdown, mit Seite; A4 Text dauerhaft; A8; A11 viele nacheinander, ein gescheitertes hält die anderen nicht auf; F1; F2 sehr lang; F6 Text einmal; F7 zwanzig Dokumente nacheinander; F9; F15; außerdem: Arbeit im Hintergrund kennt den Arbeitsbereich des Dokuments (offen aus TEN-01 · S3) | rag/01 | fertig |
-| S2 | `GET /api/v1/documents/{document}` | Sagt der Person, wie weit ihr Dokument ist und, wenn es gescheitert ist, warum. | Seite für Dokumente: Stand je Dokument, das die Seite hochgeladen hat (wartet, in Arbeit, gescheitert mit Grund), aktuell gehalten, solange es in Arbeit ist | A2 Stand wartet, in Arbeit, gescheitert; läuft weiter nach Schließen oder Abmelden; A12; F8 Dokument wartet sichtbar; F10; F14 | – | offen |
+| S2 | `GET /api/v1/documents/{document}` | Sagt der Person, wie weit ihr Dokument ist und, wenn es gescheitert ist, warum. | Seite für Dokumente: Stand je Dokument, das die Seite hochgeladen hat (wartet, in Arbeit, gescheitert mit Grund), aktuell gehalten, solange es in Arbeit ist | A2 Stand wartet, in Arbeit, gescheitert; läuft weiter nach Schließen oder Abmelden; A12; F8 Dokument wartet sichtbar; F10; F14 | – | fertig |
 | S3 | Job `ChunkDocument` | Teilt den gelesenen Text in Textstücke und hält zu jedem fest, von welcher Stelle des Dokuments es stammt. | entfällt – läuft im Hintergrund | A3 in Textstücke geteilt, je Stück Dokument und Stelle (Seite beim PDF, Überschrift bei Markdown); A4 Textstücke dauerhaft; A10 jedes Stück genau einmal in den eigenen Daten; F2 sehr kurz und sehr lang; F5 und F6 in den eigenen Daten | rag/02 | offen |
 | S4 | Befehl `app:create-search-index` | Legt den Suchindex für Textstücke einmalig an, getrennt je Arbeitsbereich; ein zweiter Lauf ändert nichts. | entfällt – läuft im Terminal | A5 Suchindex nach Arbeitsbereichen getrennt; F4 nicht erreichbar beim Anlegen; außerdem: zweiter Lauf des Befehls ändert nichts | rag/04 | offen |
 | S5 | Job `IndexDocumentChunks` | Bettet die Textstücke ein, legt sie in den Suchindex des Arbeitsbereichs und macht das Dokument damit durchsuchbar. | Seite für Dokumente: Stand „durchsuchbar“ | A2 Stand durchsuchbar; A4 Suchindex nur Kopie; A5 jedes Stück eingebettet, nur unter dem eigenen Arbeitsbereich, Bereich entsteht beim ersten Dokument von selbst; A6; A7; A9 kurzer Ausfall wird von selbst erneut versucht; A10 jedes Stück genau einmal im Suchindex; F3; F4; F5 und F6 im Suchindex; F7 zwanzig Dokumente und zwei Arbeitsbereiche zur selben Zeit; F13 Modell je Dokument festgehalten | rag/03, rag/05 | offen |
@@ -138,6 +138,29 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 
 **Wahl (Person):** Wegen eine Kompressionsbombe dann machen wir beide deine Vorschläge nicht, Deswegen finde ich dies beste Lösung: "Schutz, unabhängig vom Weg: eine Obergrenze für die Menge an Text. Ist die Ausgabe von pdftotext"
 
+### E6 · S2 · Welche Dokumente zeigt die Seite mit ihrem Stand, und wie lange?
+
+**Warum sich die Frage stellt:** Bis DOC-03 gibt es keine Liste aller Dokumente (O1); die Seite kennt nur, was sie selbst hochgeladen hat. Jana lädt das Handbuch hoch, schließt die Seite (F10) und kommt nach dem Mittag zurück: Ob sie dann den Stand noch sieht, hängt davon ab, wo sich die Seite die Dokumente merkt.
+
+| Vorschlag | Was gebaut würde | Was daraus folgt |
+| --- | --- | --- |
+| 1 | Nur im Speicher der Seite (Pinia-Store): die Dokumente, die in diesem Tab seit dem Öffnen hochgeladen wurden. Neu laden, Abmelden oder ein zweiter Tab beginnen leer. | Wenig Code, nichts im Browser, das DOC-03 wieder entfernen muss. Wer wartet und die Seite offen lässt, sieht den Stand bis zum Ende; wer sie schließt, sieht ihn erst wieder mit DOC-03. Dass die Verarbeitung weiterläuft, zeigt dann nur der Server (Test), nicht die Seite. |
+| 2 | Zusätzlich im Browser (`localStorage`) gemerkt, getrennt je Konto: die Kennungen der hochgeladenen Dokumente. Nach Neuladen oder erneutem Anmelden fragt die Seite deren Stand wieder ab; eine Kennung, die 404 ergibt, wird vergessen. | Jana sieht nach dem Schließen und nach dem Abmelden wieder, wie weit ihr Handbuch ist, und A2 lässt sich auf der Seite selbst ausprobieren. Ein zweites Konto im selben Browser sieht die Liste des ersten nicht, und ein fremdes Dokument ergäbe ohnehin 404. Mehr Code (Lesen, Schreiben, Schlüssel je Konto, Fehler beim Zugriff auf den Speicher), den DOC-03 durch die Liste vom Server ersetzt. |
+
+**Wahl (Person):** Also wenn Datei Erfolgreich in DB hochgeladen, dann sollte zum List hinzugefügt, und den User dies List Datei Tabelle schauen kann, und mit Status gezeigt werden, nachdem Dateien gesendet haben, user bekommt Nachricht, dass Datei erfolgreich gesendet aber in Prozess und dannn nach paar Sekunden dies NAchricht verschwinden sollte. E6 · 1
+
+### E7 · S2 · Wie zeigt die Seite die Stände?
+
+**Warum sich die Frage stellt:** Jana lädt zwanzig Dokumente auf einmal hoch (F7); jedes braucht seinen Stand, ein gescheitertes wie Tobias' Scan auch den Grund. DOC-01 hat festgelegt, dass die Liste aller Dokumente mit DOC-03 als sortierbare Tabelle kommt.
+
+| Vorschlag | Was gebaut würde | Was daraus folgt |
+| --- | --- | --- |
+| 1 | Eine Tabelle (`v-data-table`) unter dem Kopf der Seite mit Name, Hochgeladen und Stand; der Stand als farbiger Chip, bei „gescheitert“ der Grund in der Zeile darunter. DOC-03 füllt dieselbe Tabelle später mit allen Dokumenten und ergänzt Spalten. | Die Seite sieht schon so aus, wie sie bleibt; DOC-03 tauscht nur die Quelle der Zeilen. Bis dahin ist die Tabelle leer, solange in diesem Tab (oder nach E6 · 2 mit diesem Konto) nichts hochgeladen wurde, und braucht einen Text für den leeren Zustand. Ein langer Grund muss in die Zeile passen. |
+| 2 | Eine schlichte Liste „Gerade hochgeladen“ unter dem Kopf, die nur erscheint, wenn es etwas zu zeigen gibt: je Dokument Name und Stand als Chip, der Grund darunter. DOC-03 ersetzt die Liste durch die Tabelle. | Weniger Aufbau, und die Seite bleibt ohne Uploads so leer wie heute. Ein langer Grund hat Platz. DOC-03 baut die Anzeige neu und entfernt die Liste. |
+
+**Wahl (Person):** Glaube wie E6 Antwort, aber auch gescheiterten Nachricht, falls fehler es gibt
+
+
 ### Vom Schreiber entschieden
 
 | Schritt | Was | Entscheidung | Warum |
@@ -160,6 +183,14 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 | S1 | Leere Seiten | Jede Seite des PDF bekommt eine Zeile, auch eine ohne Text, damit die Seitenzahlen denen im PDF entsprechen. Kein lesbarer Text heißt: keine Seite hat Text. | `rag/01 · Genau parsen`; der Sprung zur Textstelle braucht die echte Seitenzahl. |
 | S1 | Fehlende Datei | Vor dem Lesen prüft der Job, ob die Datei in der Ablage liegt; fehlt sie, scheitert das Dokument sofort. Ein anderer Fehler beim Lesen der Ablage wird wiederholt. | `rag/01 · Fehler eines Dokuments halten nicht den ganzen Ablauf an`: Was nie gelingen kann, wird nicht wiederholt. |
 | S1 | Versuche | Zahl der Versuche und Abstand stehen am Job selbst, nicht nur im `--tries=3` des Dienstes `worker`. | Dann gelten sie auch, wenn der Job anders gestartet wird, und die Tests prüfen sie. |
+| S2 | Antwort | `DocumentResource` bekommt `status` (`pending`, `processing`, `failed`) und `failure_reason` (sonst `null`); dieselbe Resource gilt für Hochladen und Abfragen, sodass die Seite den Stand „wartet“ schon aus der Antwort des Hochladens kennt. | Eine Form für ein Dokument; die Seite braucht nach dem Hochladen keine zweite Anfrage. |
+| S2 | Abfrage | Das Dokument wird über den aktuellen Arbeitsbereich gesucht (`documents()->findOrFail`), ohne implizites Route Model Binding. Eine unbekannte, fremde oder ungültige Kennung ergibt dieselbe 404 im Laravel-Format. | TEN-01 · E4 · 2 und Regel aus `CLAUDE.md`; Binding lüde das Dokument ohne Arbeitsbereich. |
+| S2 | Sichtbar für | Jedes Konto des Arbeitsbereichs sieht den Stand, nicht nur das hochladende. | Abnahme A12: Grenze ist der Arbeitsbereich. |
+| S2 | Rate-Limit | Kein eigenes Limit; es gilt nur `auth:sanctum`. | Nur Lesen eigener Daten über den Primärschlüssel; die Seite fragt regelmäßig ab, ein knappes Limit träfe gerade Jana mit zwanzig Dokumenten. |
+| S2 | Aktuell halten | Die Seite fragt alle 3 Sekunden den Stand jedes Dokuments ab, das „wartet“ oder „in Arbeit“ ist, eine Anfrage je Dokument; sie hört auf, wenn es gescheitert ist (mit S5 auch durchsuchbar), und wenn die Seite verlassen wird. Kein WebSocket und kein Server-Sent Events. | Ein Schritt ist ein Endpunkt; im Stack gibt es keinen Dienst für Push. |
+| S2 | Fehler beim Abfragen | Ohne Antwort oder bei 5xx bleibt der letzte Stand stehen und der nächste Takt fragt erneut, ohne Meldung; 401 führt wie überall zum Login; 404 nimmt das Dokument aus der Anzeige. | Ein kurzer Ausfall soll keine Meldungen häufen; 404 heißt, dass es für dieses Konto nicht (mehr) sichtbar ist. |
+| S2 | Meldungen (E7) | Die Meldung nach dem Hochladen bleibt, wie sie ist (5 Sekunden). Erkennt die Seite beim Abfragen, dass ein Dokument gescheitert ist, erscheint zusätzlich eine Meldung mit Name und Grund in derselben Snackbar-Reihe; der Grund steht weiter in der Tabelle. | Wahl der Person zu E7. |
+| S2 | Abmelden | Abmelden beendet nur den Zugang; ein Test zeigt, dass ein Dokument nach dem Abmelden weiter verarbeitet wird. | Abnahme A2; der Job hängt an keinem Zugang. |
 
 ## 4. Abnahme
 
@@ -172,3 +203,4 @@ Das Blatt hält fest, was der Use Case fachlich bedeutet, in welchen Schritten e
 - O3 · S1 · A1 · `api` wartet beim Kaltstart weiter darauf, dass Weaviate und Ollama gestartet sind; scheitert ihr Start, etwa an einem belegten Port 11434, startet die API nicht, und Hochladen ist nicht möglich.
 - O4 · S1 · F15 · Der Test für die genaue Textgrenze wäre auch mit dem Code vor dem Review grün; dass die Ausgabe ab dem Start gezählt wird und ein Signal an einen schon beendeten `pdftotext` nicht bis in den Job wirft, prüft kein Test.
 - O5 · S1 · – · Der Test für die genaue Textgrenze setzt `memory_limit` auf 512M und stellt den alten Wert nicht wieder her; spätere Tests im selben PHP-Prozess laufen mit 512M.
+- O6 · S2, S5 · A2, F8, F10 · Vorgabe der Person (2026-11-26): Ab diesem Punkt wird nur Backend-Code umgesetzt, weil die Zeit knapp ist. Die Oberfläche von S2 (Tabelle mit Stand, Grund und Meldung beim Scheitern nach E7) und der Stand „durchsuchbar“ auf der Seite aus S5 werden nicht gebaut; den Stand gibt bis dahin nur der Endpunkt.

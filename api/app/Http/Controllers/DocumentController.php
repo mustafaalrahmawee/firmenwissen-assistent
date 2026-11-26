@@ -8,9 +8,11 @@ use App\Http\Requests\StoreDocumentRequest;
 use App\Http\Resources\DocumentResource;
 use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -74,10 +76,16 @@ class DocumentController extends Controller
 
     /**
      * Return one document of the current workspace with its processing status.
-     * The document is looked up only among the documents of the workspace.
+     * The document is looked up only among the documents of the workspace. An id that is no
+     * ULID is not looked up at all, because MySQL would match an id with trailing spaces;
+     * it gets the same 404 as an unknown id.
      */
     public function show(CurrentTenant $currentTenant, string $document): DocumentResource
     {
+        if (! Str::isUlid($document)) {
+            throw (new ModelNotFoundException)->setModel(Document::class, $document);
+        }
+
         return DocumentResource::make($currentTenant->get()->documents()->findOrFail($document));
     }
 }
