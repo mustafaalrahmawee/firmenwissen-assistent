@@ -6,9 +6,11 @@ use App\Http\CurrentTenant;
 use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
 use App\Models\DocumentPage;
+use Illuminate\Process\Exceptions\ProcessFailedException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
@@ -235,5 +237,50 @@ describe('ExtractDocumentText', function () {
         expect($stored->status)->toBe(DocumentStatus::Processing)
             ->and($stored->failure_reason)->toBeNull()
             ->and($stored->pages()->count())->toBe(1);
+    });
+
+    it('fails a PDF that cannot be opened at once with its reason in German and keeps the file', function (string $fixture, string $reason) {
+        Log::spy();
+        $content = file_get_contents(fixture('documents/'.$fixture));
+        $document = documentWithFile(DocumentFormat::Pdf, $content);
+        $document->pages()->create(['page' => 1, 'text' => 'alter Text']);
+        $job = (new ExtractDocumentText($document))->withFakeQueueInteractions();
+
+        $job->handle();
+
+        $job->assertNotFailed()->assertNotReleased();
+        $stored = $document->fresh();
+        expect($stored->status)->toBe(DocumentStatus::Failed)
+            ->and($stored->failure_reason)->toBe($reason)
+            ->and($stored->pages()->count())->toBe(0)
+            ->and(Storage::disk('local')->get($stored->path))->toBe($content);
+        Log::shouldHaveReceived('warning')
+            ->with('Dokument ist gescheitert.', ['document_id' => $document->id, 'reason' => $reason])
+            ->once();
+    })->with([
+        'mit Kennwort geschützt' => ['angebot-kennwort.pdf', 'Das PDF ist mit einem Kennwort geschützt. Bitte eine Fassung ohne Kennwort hochladen.'],
+        'beschädigt' => ['vertrag-beschaedigt.pdf', 'Das PDF ist beschädigt und lässt sich nicht öffnen.'],
+    ]);
+
+    it('reads a PDF that opens without a password and only forbids copying', function () {
+        $document = documentWithFile(DocumentFormat::Pdf, file_get_contents(fixture('documents/preisliste-kopierschutz.pdf')));
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect($document->fresh()->status)->toBe(DocumentStatus::Processing)
+            ->and($document->pages()->pluck('text', 'page')->all())->toBe([1 => "Preisliste 2027\nWartung pro Stunde\n\n"]);
+    });
+
+    it('throws any other error of pdftotext to be retried and does not fail the document', function () {
+        Process::fake(['*' => Process::result(errorOutput: 'Out of memory', exitCode: 99)]);
+        $document = documentWithFile(DocumentFormat::Pdf, file_get_contents(fixture('documents/betriebshandbuch-vpn.pdf')));
+        $document->pages()->create(['page' => 1, 'text' => 'alter Text']);
+
+        expect(fn () => (new ExtractDocumentText($document))->handle())->toThrow(ProcessFailedException::class);
+
+        $stored = $document->fresh();
+        expect($stored->status)->toBe(DocumentStatus::Processing)
+            ->and($stored->failure_reason)->toBeNull()
+            ->and($stored->pages()->pluck('text')->all())->toBe(['alter Text']);
     });
 });
