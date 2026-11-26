@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use Database\Factories\DocumentPageFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -13,6 +15,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['page', 'text'])]
 class DocumentPage extends Model
 {
+    /** @use HasFactory<DocumentPageFactory> */
+    use HasFactory;
+
     public $timestamps = false;
 
     /**

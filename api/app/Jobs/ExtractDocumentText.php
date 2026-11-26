@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
+use League\Flysystem\UnableToReadFile;
 use Normalizer;
 use RuntimeException;
 use Throwable;
@@ -108,7 +109,7 @@ class ExtractDocumentText implements ShouldQueue
         try {
             $texts = collect($this->readPages())->map($this->clean(...));
 
-            $isBlank = $texts->every(fn (string $text): bool => preg_match('/[^\s\p{Z}\p{Cf}]/u', $text) === 0);
+            $isBlank = $texts->every(fn (string $text): bool => preg_match('/[^\s\p{Z}\p{Cf}\p{Cc}]/u', $text) === 0);
 
             if ($isBlank) {
                 throw $this->document->format === DocumentFormat::Pdf ? UnreadableDocument::noTextInPdf() : UnreadableDocument::emptyMarkdown();
@@ -163,7 +164,12 @@ class ExtractDocumentText implements ShouldQueue
      * other error of pdftotext or of the disk is thrown to be retried.
      *
      * pdftotext is killed as soon as its text passes the limit, so a PDF that unpacks
-     * into gigabytes costs a few seconds and no more memory than the limit.
+     * into gigabytes costs a few seconds and no more memory than the limit. The output
+     * is counted from the start; a process that has already ended is not killed, its
+     * text is still too much.
+     *
+     * A PDF the worker may not read is no damaged PDF: it is thrown as a disk error to be
+     * retried, before pdftotext would report it as a file it cannot open.
      *
      * @return list<string>
      *
@@ -178,22 +184,30 @@ class ExtractDocumentText implements ShouldQueue
         }
 
         if ($this->document->format === DocumentFormat::Pdf) {
-            $textBytes = 0;
-            $hasTooMuchText = false;
-            $process = Process::start(['pdftotext', '-enc', 'UTF-8', $disk->path($this->document->path), '-']);
+            $path = $disk->path($this->document->path);
 
-            $result = $process->wait(function (string $type, string $output) use ($process, &$textBytes, &$hasTooMuchText): void {
-                if ($type === 'out' && ! $hasTooMuchText) {
+            if (! is_readable($path)) {
+                throw UnableToReadFile::fromLocation($this->document->path, 'Der Worker darf die Datei nicht lesen.');
+            }
+
+            $textBytes = 0;
+            $isKilled = false;
+            $process = null;
+
+            $process = Process::start(['pdftotext', '-enc', 'UTF-8', $path, '-'], function (string $type, string $output) use (&$process, &$textBytes, &$isKilled): void {
+                if ($type === 'out') {
                     $textBytes += strlen($output);
 
-                    if ($textBytes > self::MAX_TEXT_BYTES) {
-                        $hasTooMuchText = true;
-                        $process->signal(SIGKILL);
+                    if ($textBytes > self::MAX_TEXT_BYTES && $process !== null && ! $isKilled) {
+                        $isKilled = true;
+                        rescue(fn () => $process->signal(SIGKILL), report: false);
                     }
                 }
             });
 
-            if ($hasTooMuchText) {
+            $result = $process->wait();
+
+            if ($textBytes > self::MAX_TEXT_BYTES) {
                 throw UnreadableDocument::tooMuchText();
             }
 

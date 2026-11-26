@@ -5,6 +5,7 @@ use App\Enums\DocumentStatus;
 use App\Http\CurrentTenant;
 use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
+use App\Models\DocumentPage;
 use App\Models\User;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\UploadedFile;
@@ -126,7 +127,7 @@ describe('ExtractDocumentText', function () {
 
     it('replaces pages of an earlier run, also those the new text no longer has', function () {
         $document = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
-        $document->pages()->createMany([
+        DocumentPage::factory()->for($document)->createMany([
             ['page' => 1, 'text' => 'alter Text'],
             ['page' => 2, 'text' => 'alte zweite Seite'],
         ]);
@@ -138,7 +139,7 @@ describe('ExtractDocumentText', function () {
 
     it('leaves the pages of an earlier run whole when saving the new ones fails', function () {
         $document = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
-        $document->pages()->createMany([
+        DocumentPage::factory()->for($document)->createMany([
             ['page' => 1, 'text' => 'alter Text'],
             ['page' => 2, 'text' => 'alte zweite Seite'],
         ]);
@@ -195,7 +196,7 @@ describe('ExtractDocumentText', function () {
         Log::spy();
         $content = file_get_contents(fixture('documents/wartungsvertrag-scan.pdf'));
         $document = documentWithFile(DocumentFormat::Pdf, $content);
-        $document->pages()->create(['page' => 1, 'text' => 'alter Text']);
+        DocumentPage::factory()->for($document)->create(['text' => 'alter Text']);
         $job = (new ExtractDocumentText($document))->withFakeQueueInteractions();
 
         $job->handle();
@@ -226,6 +227,7 @@ describe('ExtractDocumentText', function () {
         'leer' => [''],
         'Leerzeilen, Leerzeichen und Tabulatoren' => ["\r\n\r\n  \t\n"],
         'geschütztes Leerzeichen, unsichtbares Zeichen und BOM' => ["\u{FEFF}\u{00A0}\u{200B}\n"],
+        'nur Steuerzeichen' => ["\u{0001}\u{001F}\u{007F}\n"],
     ]);
 
     it('counts a document with one readable character as readable', function () {
@@ -253,7 +255,7 @@ describe('ExtractDocumentText', function () {
         Log::spy();
         $content = file_get_contents(fixture('documents/'.$fixture));
         $document = documentWithFile(DocumentFormat::Pdf, $content);
-        $document->pages()->create(['page' => 1, 'text' => 'alter Text']);
+        DocumentPage::factory()->for($document)->create(['text' => 'alter Text']);
         $job = (new ExtractDocumentText($document))->withFakeQueueInteractions();
 
         $job->handle();
@@ -284,7 +286,7 @@ describe('ExtractDocumentText', function () {
     it('throws any other error of pdftotext to be retried and does not fail the document', function () {
         Process::fake(['*' => Process::result(errorOutput: 'Out of memory', exitCode: 99)]);
         $document = documentWithFile(DocumentFormat::Pdf, file_get_contents(fixture('documents/betriebshandbuch-vpn.pdf')));
-        $document->pages()->create(['page' => 1, 'text' => 'alter Text']);
+        DocumentPage::factory()->for($document)->create(['text' => 'alter Text']);
 
         expect(fn () => (new ExtractDocumentText($document))->handle())->toThrow(ProcessFailedException::class);
 
@@ -315,8 +317,9 @@ describe('ExtractDocumentText', function () {
         'Markdown' => [DocumentFormat::Markdown],
     ]);
 
-    it('throws another error while reading the disk to be retried and does not fail the document', function () {
-        $document = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
+    it('throws another error while reading the disk to be retried and does not fail the document', function (DocumentFormat $format, string $fixture) {
+        $content = $fixture === '' ? "# Neue Laptops\n" : file_get_contents(fixture('documents/'.$fixture));
+        $document = documentWithFile($format, $content);
         chmod(Storage::disk('local')->path($document->path), 0);
 
         expect(fn () => (new ExtractDocumentText($document))->handle())->toThrow(UnableToReadFile::class);
@@ -324,7 +327,10 @@ describe('ExtractDocumentText', function () {
         $stored = $document->fresh();
         expect($stored->status)->toBe(DocumentStatus::Processing)
             ->and($stored->failure_reason)->toBeNull();
-    });
+    })->with([
+        'Markdown' => [DocumentFormat::Markdown, ''],
+        'PDF, nicht als beschädigt' => [DocumentFormat::Pdf, 'betriebshandbuch-vpn.pdf'],
+    ]);
 
     it('tries three times, waiting 10 and then 60 seconds', function () {
         $job = new ExtractDocumentText(Document::factory()->create());
@@ -338,7 +344,7 @@ describe('ExtractDocumentText', function () {
         Log::spy();
         Process::fake(['*' => Process::result(errorOutput: 'Out of memory', exitCode: 99)]);
         $document = documentWithFile(DocumentFormat::Pdf, file_get_contents(fixture('documents/betriebshandbuch-vpn.pdf')));
-        $document->pages()->create(['page' => 1, 'text' => 'alter Text']);
+        DocumentPage::factory()->for($document)->create(['text' => 'alter Text']);
         ExtractDocumentText::dispatch($document);
 
         workOneJob();
@@ -448,6 +454,17 @@ describe('ExtractDocumentText', function () {
 
     it('allows twenty million bytes of plain text, which a run holds about three times inside the 128 MB of the worker', function () {
         expect(ExtractDocumentText::MAX_TEXT_BYTES)->toBe(20_000_000);
+    });
+
+    it('fails a PDF whose text passes the limit by one byte in the last piece of output, after pdftotext has ended', function () {
+        ini_set('memory_limit', '512M');
+        Process::fake(['*' => Process::result(output: str_repeat('a', ExtractDocumentText::MAX_TEXT_BYTES + 1))]);
+        $document = documentWithFile(DocumentFormat::Pdf, file_get_contents(fixture('documents/betriebshandbuch-vpn.pdf')));
+
+        (new ExtractDocumentText($document))->handle();
+
+        expect($document->fresh()->failure_reason)
+            ->toBe('Das PDF enthält mehr Text, als der Assistent verarbeiten kann. Bitte das Dokument in kleinere Teile aufteilen.');
     });
 });
 

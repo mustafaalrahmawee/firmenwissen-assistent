@@ -18,7 +18,7 @@ return new class extends Migration
             $table->id();
             $table->foreignUlid('document_id')->constrained()->cascadeOnDelete();
             $table->unsignedInteger('page');
-            $table->mediumText('text');
+            $table->longText('text');
 
             $table->unique(['document_id', 'page']);
         });
