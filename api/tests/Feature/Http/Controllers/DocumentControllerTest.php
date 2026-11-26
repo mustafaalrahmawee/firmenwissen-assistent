@@ -575,4 +575,32 @@ describe('GET /api/v1/documents/{document}', function () {
             ->not->toContain('Betriebshandbuch')
             ->not->toContain('Kennwort');
     });
+
+    it('answers 404 for a document of another workspace even when the request names that workspace', function (string $place) {
+        $jana = User::factory()->for(Tenant::factory()->state(['name' => 'Nordlicht IT GmbH']))->create(['name' => 'Jana Petrov']);
+        $handbook = Document::factory()->for($jana)->for($jana->tenant)->create(['name' => 'Betriebshandbuch VPN.pdf']);
+        Sanctum::actingAs(User::factory()->for(Tenant::factory()->state(['name' => 'Hafenkante Systemhaus GmbH']))->create(['name' => 'Mehmet Aydin']));
+        $url = DOCUMENTS_URL.'/'.$handbook->id;
+
+        $response = match ($place) {
+            'body' => $this->json('GET', $url, ['tenant_id' => $jana->tenant_id]),
+            'query' => $this->getJson($url.'?tenant_id='.$jana->tenant_id),
+            'header' => $this->withHeader('X-Tenant-Id', $jana->tenant_id)->getJson($url),
+        };
+
+        $response->assertNotFound();
+        expect($response->getContent())->not->toContain('Betriebshandbuch');
+    })->with(['body', 'query', 'header']);
+
+    it('answers 404 and no server error for an id that is no document id', function (string $id) {
+        janaLoggedIn();
+
+        $this->getJson(DOCUMENTS_URL.'/'.rawurlencode($id))->assertNotFound();
+    })->with([
+        'zu kurz' => ['abc'],
+        'zu lang' => [str_repeat('0', 300)],
+        'Sonderzeichen' => ["01j'; DROP TABLE documents; --"],
+        'Pfad' => ['../../etc/passwd'],
+        'Großbuchstaben' => ['01JZZZZZZZZZZZZZZZZZZZZZZZ'],
+    ]);
 });
