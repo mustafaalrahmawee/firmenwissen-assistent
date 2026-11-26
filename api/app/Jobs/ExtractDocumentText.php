@@ -10,6 +10,7 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\WithoutRelations;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Normalizer;
@@ -24,10 +25,6 @@ class ExtractDocumentText implements ShouldQueue
     use Queueable;
 
     /**
-     * The queue keeps only the id of the document; workspace and path are read
-     * from MySQL when the job runs, since there is no login in the background.
-     */
-    /**
      * A run is stopped after this many seconds, below the retry_after of the queue (90 s),
      * so the queue never hands out the job again while a run is still going.
      */
@@ -39,6 +36,17 @@ class ExtractDocumentText implements ShouldQueue
      */
     public const int LOCK_SECONDS = 85;
 
+    /**
+     * The reason for a PDF without readable text; text in images is not recognised.
+     */
+    private const string NO_TEXT_IN_PDF = 'Das PDF enthält keinen lesbaren Text. Vielleicht ist es ein Scan; Text aus Bildern wird nicht erkannt.';
+
+    private const string EMPTY_MARKDOWN = 'Die Markdown-Datei ist leer.';
+
+    /**
+     * The queue keeps only the id of the document; workspace and path are read
+     * from MySQL when the job runs, since there is no login in the background.
+     */
     public function __construct(#[WithoutRelations] public Document $document) {}
 
     /**
@@ -55,20 +63,45 @@ class ExtractDocumentText implements ShouldQueue
     /**
      * Each run replaces all pages of the document in one transaction, so a repeated
      * run leaves every page once and an interrupted one leaves the old pages whole.
+     * A document without readable text fails at once, without a further attempt,
+     * since reading the same file again gives the same result.
      */
     public function handle(): void
     {
         $this->document->status = DocumentStatus::Processing;
+        $this->document->failure_reason = null;
         $this->document->save();
 
-        $pages = collect($this->readPages())
-            ->map($this->clean(...))
-            ->map(fn (string $text, int $index): array => ['page' => $index + 1, 'text' => $text]);
+        $texts = collect($this->readPages())->map($this->clean(...));
 
-        DB::transaction(function () use ($pages): void {
+        $isBlank = $texts->every(fn (string $text): bool => preg_match('/[^\s\p{Z}\p{Cf}]/u', $text) === 0);
+
+        if ($isBlank) {
+            $this->failDocument($this->document->format === DocumentFormat::Pdf ? self::NO_TEXT_IN_PDF : self::EMPTY_MARKDOWN);
+        } else {
+            $pages = $texts->map(fn (string $text, int $index): array => ['page' => $index + 1, 'text' => $text]);
+
+            DB::transaction(function () use ($pages): void {
+                $this->document->pages()->delete();
+                $this->document->pages()->createMany($pages);
+            });
+        }
+    }
+
+    /**
+     * Marks the document as failed with a reason in German and removes the pages of an
+     * earlier run, so a failed document never has text. The file stays on the disk.
+     */
+    private function failDocument(string $reason): void
+    {
+        DB::transaction(function () use ($reason): void {
             $this->document->pages()->delete();
-            $this->document->pages()->createMany($pages);
+            $this->document->status = DocumentStatus::Failed;
+            $this->document->failure_reason = $reason;
+            $this->document->save();
         });
+
+        Log::warning('Dokument ist gescheitert.', ['document_id' => $this->document->id, 'reason' => $reason]);
     }
 
     /**

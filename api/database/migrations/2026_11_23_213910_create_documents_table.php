@@ -24,6 +24,7 @@ return new class extends Migration
             $table->char('sha256', 64);
             $table->string('path');
             $table->string('status', 16)->default('pending');
+            $table->string('failure_reason')->nullable();
             $table->timestamps();
 
             $table->unique(['tenant_id', 'sha256']);

@@ -8,6 +8,7 @@ use App\Models\Document;
 use App\Models\DocumentPage;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
@@ -176,5 +177,63 @@ describe('ExtractDocumentText', function () {
         ExtractDocumentText::dispatchSync($other);
 
         expect($other->pages()->count())->toBe(1);
+    });
+
+    it('fails a PDF without readable text at once with a reason in German, removes earlier pages and keeps the file', function () {
+        Log::spy();
+        $content = file_get_contents(fixture('documents/wartungsvertrag-scan.pdf'));
+        $document = documentWithFile(DocumentFormat::Pdf, $content);
+        $document->pages()->create(['page' => 1, 'text' => 'alter Text']);
+        $job = (new ExtractDocumentText($document))->withFakeQueueInteractions();
+
+        $job->handle();
+
+        $job->assertNotFailed()->assertNotReleased();
+        $stored = $document->fresh();
+        $reason = 'Das PDF enthält keinen lesbaren Text. Vielleicht ist es ein Scan; Text aus Bildern wird nicht erkannt.';
+        expect($stored->status)->toBe(DocumentStatus::Failed)
+            ->and($stored->failure_reason)->toBe($reason)
+            ->and($stored->pages()->count())->toBe(0)
+            ->and(Storage::disk('local')->get($stored->path))->toBe($content);
+        Log::shouldHaveReceived('warning')
+            ->with('Dokument ist gescheitert.', ['document_id' => $document->id, 'reason' => $reason])
+            ->once();
+    });
+
+    it('fails a Markdown file with nothing but white space as empty', function (string $content) {
+        $document = documentWithFile(DocumentFormat::Markdown, $content);
+
+        ExtractDocumentText::dispatchSync($document);
+
+        $stored = $document->fresh();
+        expect($stored->status)->toBe(DocumentStatus::Failed)
+            ->and($stored->failure_reason)->toBe('Die Markdown-Datei ist leer.')
+            ->and($stored->pages()->count())->toBe(0);
+        Storage::disk('local')->assertExists($stored->path);
+    })->with([
+        'leer' => [''],
+        'Leerzeilen, Leerzeichen und Tabulatoren' => ["\r\n\r\n  \t\n"],
+        'geschütztes Leerzeichen, unsichtbares Zeichen und BOM' => ["\u{FEFF}\u{00A0}\u{200B}\n"],
+    ]);
+
+    it('counts a document with one readable character as readable', function () {
+        $document = documentWithFile(DocumentFormat::Markdown, "\n\n3\n");
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect($document->fresh()->status)->toBe(DocumentStatus::Processing)
+            ->and($document->pages()->pluck('text')->all())->toBe(["\n\n3\n"]);
+    });
+
+    it('clears the reason of an earlier failure when it runs again', function () {
+        $document = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
+        $document->forceFill(['status' => DocumentStatus::Failed, 'failure_reason' => 'Die Markdown-Datei ist leer.'])->save();
+
+        ExtractDocumentText::dispatchSync($document);
+
+        $stored = $document->fresh();
+        expect($stored->status)->toBe(DocumentStatus::Processing)
+            ->and($stored->failure_reason)->toBeNull()
+            ->and($stored->pages()->count())->toBe(1);
     });
 });

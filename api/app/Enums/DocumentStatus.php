@@ -12,4 +12,7 @@ enum DocumentStatus: string
 
     /** The processing has started and is not finished. */
     case Processing = 'processing';
+
+    /** The processing gave up; the reason stands at the document. */
+    case Failed = 'failed';
 }
