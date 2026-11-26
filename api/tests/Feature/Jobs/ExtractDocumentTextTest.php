@@ -8,7 +8,9 @@ use App\Models\Document;
 use App\Models\DocumentPage;
 use Illuminate\Process\Exceptions\ProcessFailedException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -139,7 +141,7 @@ describe('ExtractDocumentText', function () {
         ]);
         DocumentPage::creating(fn () => throw new RuntimeException('Datenbank weg'));
 
-        expect(fn () => ExtractDocumentText::dispatchSync($document))->toThrow(RuntimeException::class, 'Datenbank weg');
+        expect(fn () => (new ExtractDocumentText($document))->handle())->toThrow(RuntimeException::class, 'Datenbank weg');
 
         expect($document->pages()->pluck('text', 'page')->all())->toBe([1 => 'alter Text', 2 => 'alte zweite Seite']);
     });
@@ -316,4 +318,66 @@ describe('ExtractDocumentText', function () {
         expect($stored->status)->toBe(DocumentStatus::Processing)
             ->and($stored->failure_reason)->toBeNull();
     });
+
+    it('tries three times, waiting 10 and then 60 seconds', function () {
+        $job = new ExtractDocumentText(Document::factory()->create());
+
+        expect($job->tries)->toBe(3)
+            ->and($job->backoff)->toBe([10, 60]);
+    });
+
+    it('retries a passing error and fails the document with a general reason only after the third attempt', function () {
+        config(['queue.default' => 'database']);
+        Log::spy();
+        Process::fake(['*' => Process::result(errorOutput: 'Out of memory', exitCode: 99)]);
+        $document = documentWithFile(DocumentFormat::Pdf, file_get_contents(fixture('documents/betriebshandbuch-vpn.pdf')));
+        $document->pages()->create(['page' => 1, 'text' => 'alter Text']);
+        ExtractDocumentText::dispatch($document);
+
+        workOneJob();
+        expect($document->fresh()->status)->toBe(DocumentStatus::Processing);
+
+        $this->travel(10)->seconds();
+        workOneJob();
+        expect($document->fresh()->status)->toBe(DocumentStatus::Processing);
+
+        $this->travel(60)->seconds();
+        workOneJob();
+
+        $reason = 'Die Verarbeitung ist nach drei Versuchen an einem technischen Fehler gescheitert.';
+        $stored = $document->fresh();
+        expect($stored->status)->toBe(DocumentStatus::Failed)
+            ->and($stored->failure_reason)->toBe($reason)
+            ->and($stored->pages()->count())->toBe(0)
+            ->and(DB::table('jobs')->count())->toBe(0)
+            ->and(DB::table('failed_jobs')->count())->toBe(1);
+        Log::shouldHaveReceived('warning')
+            ->with('Dokument ist gescheitert.', ['document_id' => $document->id, 'reason' => $reason])
+            ->once();
+    });
+
+    it('goes on with the other documents while one waits for its next attempt and another has failed', function () {
+        config(['queue.default' => 'database']);
+        $waiting = documentWithFile(DocumentFormat::Markdown, "# Angebot\n");
+        chmod(Storage::disk('local')->path($waiting->path), 0);
+        $scan = documentWithFile(DocumentFormat::Pdf, file_get_contents(fixture('documents/wartungsvertrag-scan.pdf')));
+        $notes = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
+        collect([$waiting, $scan, $notes])->each(fn (Document $document) => ExtractDocumentText::dispatch($document));
+
+        Artisan::call('queue:work', ['--stop-when-empty' => true, '--sleep' => 0]);
+
+        expect($waiting->fresh()->status)->toBe(DocumentStatus::Processing)
+            ->and($scan->fresh()->status)->toBe(DocumentStatus::Failed)
+            ->and($notes->fresh()->status)->toBe(DocumentStatus::Processing)
+            ->and($notes->pages()->pluck('text')->all())->toBe(["# Neue Laptops\n"])
+            ->and(DB::table('jobs')->count())->toBe(1);
+    });
 });
+
+/**
+ * Lets the queue worker run the next job that is due, as the service "worker" does.
+ */
+function workOneJob(): void
+{
+    Artisan::call('queue:work', ['--once' => true, '--sleep' => 0]);
+}

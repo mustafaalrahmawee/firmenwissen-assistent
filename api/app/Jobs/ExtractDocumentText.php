@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Normalizer;
 use RuntimeException;
+use Throwable;
 
 /**
  * Reads the text of an uploaded document from the disk and keeps it page by page:
@@ -30,6 +31,23 @@ class ExtractDocumentText implements ShouldQueue
      * so the queue never hands out the job again while a run is still going.
      */
     public int $timeout = 80;
+
+    /**
+     * Any error that is not about the file itself may pass, so a run is tried three times.
+     */
+    public int $tries = 3;
+
+    /**
+     * Seconds to wait before the second and the third attempt, so a passing error has time to end.
+     *
+     * @var list<int>
+     */
+    public array $backoff = [10, 60];
+
+    /**
+     * The reason after the last attempt; the error itself is kept in the failed jobs of the queue.
+     */
+    private const string TECHNICAL_FAILURE = 'Die Verarbeitung ist nach drei Versuchen an einem technischen Fehler gescheitert.';
 
     /**
      * The lock of a run that died expires between the timeout and the retry_after of
@@ -92,6 +110,14 @@ class ExtractDocumentText implements ShouldQueue
             $this->document->pages()->delete();
             $this->document->pages()->createMany($pages);
         });
+    }
+
+    /**
+     * Called by the queue after the last attempt, on a new instance of the job.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        $this->failDocument(self::TECHNICAL_FAILURE);
     }
 
     /**
