@@ -542,4 +542,37 @@ describe('GET /api/v1/documents/{document}', function () {
 
         $this->getJson(DOCUMENTS_URL.'/'.$document->id)->assertUnauthorized();
     });
+
+    it('shows the status to every person of the workspace, not only the uploader', function () {
+        $jana = User::factory()->for(Tenant::factory()->state(['name' => 'Nordlicht IT GmbH']))->create(['name' => 'Jana Petrov']);
+        $tobias = User::factory()->for($jana->tenant)->create(['name' => 'Tobias Kern']);
+        $document = Document::factory()->for($jana)->for($jana->tenant)->create(['status' => DocumentStatus::Processing]);
+        Sanctum::actingAs($tobias);
+
+        $this->getJson(DOCUMENTS_URL.'/'.$document->id)
+            ->assertOk()
+            ->assertJsonPath('data.id', $document->id)
+            ->assertJsonPath('data.status', 'processing');
+    });
+
+    it('answers a document of another workspace exactly like one that does not exist', function () {
+        config(['app.debug' => false]);
+        $handbook = Document::factory()->create([
+            'name' => 'Betriebshandbuch VPN.pdf',
+            'status' => DocumentStatus::Failed,
+            'failure_reason' => 'Das PDF ist mit einem Kennwort geschützt.',
+        ]);
+        $unknownId = (string) Str::ulid();
+        Sanctum::actingAs(User::factory()->for(Tenant::factory()->state(['name' => 'Hafenkante Systemhaus GmbH']))->create(['name' => 'Mehmet Aydin']));
+
+        $foreign = $this->getJson(DOCUMENTS_URL.'/'.$handbook->id);
+        $unknown = $this->getJson(DOCUMENTS_URL.'/'.$unknownId);
+
+        $foreign->assertNotFound();
+        $unknown->assertNotFound();
+        expect(str_replace($handbook->id, '{id}', $foreign->getContent()))
+            ->toBe(str_replace($unknownId, '{id}', $unknown->getContent()))
+            ->not->toContain('Betriebshandbuch')
+            ->not->toContain('Kennwort');
+    });
 });
