@@ -603,4 +603,17 @@ describe('GET /api/v1/documents/{document}', function () {
         'Pfad' => ['../../etc/passwd'],
         'Großbuchstaben' => ['01JZZZZZZZZZZZZZZZZZZZZZZZ'],
     ]);
+
+    it('keeps a document pending while nothing works off the queue, and its processing stays queued', function () {
+        janaLoggedIn();
+        $id = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen Laptops.md', '# Neue Laptops')])->json('data.id');
+
+        $this->travel(1)->hour();
+
+        $this->getJson(DOCUMENTS_URL.'/'.$id)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'pending')
+            ->assertJsonPath('data.failure_reason', null);
+        Queue::assertPushed(ExtractDocumentText::class, fn (ExtractDocumentText $job) => $job->document->id === $id);
+    });
 });
