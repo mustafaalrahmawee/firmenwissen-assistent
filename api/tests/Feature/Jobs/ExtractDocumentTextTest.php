@@ -6,6 +6,8 @@ use App\Http\CurrentTenant;
 use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
 use App\Models\DocumentPage;
+use App\Models\User;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Process\Exceptions\ProcessFailedException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Artisan;
@@ -14,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
+use Laravel\Sanctum\Sanctum;
 use League\Flysystem\UnableToReadFile;
 
 beforeEach(function () {
@@ -371,6 +374,28 @@ describe('ExtractDocumentText', function () {
             ->and($notes->fresh()->status)->toBe(DocumentStatus::Processing)
             ->and($notes->pages()->pluck('text')->all())->toBe(["# Neue Laptops\n"])
             ->and(DB::table('jobs')->count())->toBe(1);
+    });
+
+    it('works off twenty uploads one after another and gives each document its own pages', function () {
+        config(['queue.default' => 'database']);
+        Sanctum::actingAs(User::factory()->create(['name' => 'Jana Petrov']));
+        $numbers = range(1, 20);
+
+        foreach ($numbers as $number) {
+            $this->postJson('/api/v1/documents', ['file' => UploadedFile::fake()->createWithContent("Notiz {$number}.md", "# Notiz {$number}\n")])
+                ->assertCreated();
+        }
+        expect(DB::table('jobs')->count())->toBe(20);
+
+        Artisan::call('queue:work', ['--stop-when-empty' => true, '--sleep' => 0]);
+
+        $documents = Document::with('pages')->get();
+        expect($documents)->toHaveCount(20)
+            ->and($documents->every(fn (Document $document): bool => $document->status === DocumentStatus::Processing))->toBeTrue()
+            ->and($documents->mapWithKeys(fn (Document $document): array => [$document->name => $document->pages->pluck('text')->all()])->sortKeys()->all())
+            ->toBe(collect($numbers)->mapWithKeys(fn (int $number): array => ["Notiz {$number}.md" => ["# Notiz {$number}\n"]])->sortKeys()->all())
+            ->and(DB::table('jobs')->count())->toBe(0)
+            ->and(DB::table('failed_jobs')->count())->toBe(0);
     });
 });
 
