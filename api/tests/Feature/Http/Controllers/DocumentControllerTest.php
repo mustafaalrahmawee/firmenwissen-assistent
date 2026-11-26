@@ -7,6 +7,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
@@ -615,5 +616,27 @@ describe('GET /api/v1/documents/{document}', function () {
             ->assertJsonPath('data.status', 'pending')
             ->assertJsonPath('data.failure_reason', null);
         Queue::assertPushed(ExtractDocumentText::class, fn (ExtractDocumentText $job) => $job->document->id === $id);
+    });
+
+    it('processes a document to the end after its uploader logged out and shows the new status after the next login', function () {
+        $jana = User::factory()->for(Tenant::factory()->state(['name' => 'Nordlicht IT GmbH']))->create(['name' => 'Jana Petrov']);
+        $morningToken = $jana->createToken('web')->plainTextToken;
+        $id = $this->withToken($morningToken)
+            ->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen Laptops.md', "# Neue Laptops\n\nAlle Geräte bekommen 32 GB RAM.")])
+            ->assertCreated()
+            ->json('data.id');
+        $this->withToken($morningToken)->postJson('/api/v1/logout')->assertNoContent();
+
+        Queue::pushed(ExtractDocumentText::class)->sole()->handle();
+
+        Auth::forgetGuards();
+        $this->withToken($morningToken)->getJson(DOCUMENTS_URL.'/'.$id)->assertUnauthorized();
+        expect(Document::findOrFail($id)->pages()->count())->toBe(1);
+
+        Auth::forgetGuards();
+        $this->withToken($jana->createToken('web')->plainTextToken)
+            ->getJson(DOCUMENTS_URL.'/'.$id)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'processing');
     });
 });
