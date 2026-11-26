@@ -34,6 +34,14 @@ class UnreadableDocument extends Exception
     }
 
     /**
+     * More plain text than one run can hold in memory, e.g. a PDF built to unpack into gigabytes.
+     */
+    public static function tooMuchText(): self
+    {
+        return new self('Das PDF enthält mehr Text, als der Assistent verarbeiten kann. Bitte das Dokument in kleinere Teile aufteilen.');
+    }
+
+    /**
      * No advice to upload again: the upload refuses the same content while the document exists.
      */
     public static function missingFile(): self

@@ -6,10 +6,12 @@ use App\Enums\DocumentFormat;
 use App\Enums\DocumentStatus;
 use App\Exceptions\UnreadableDocument;
 use App\Models\Document;
+use App\Models\DocumentPage;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\WithoutRelations;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
@@ -62,6 +64,19 @@ class ExtractDocumentText implements ShouldQueue
     private const int PDFTOTEXT_OPEN_ERROR = 1;
 
     /**
+     * Pages are written in bundles: few queries for a long PDF, and each query stays
+     * far below the size limit MySQL has for one statement.
+     */
+    private const int PAGES_PER_INSERT = 100;
+
+    /**
+     * The most plain text a PDF may give. A run holds its text about three times over,
+     * so this keeps it inside the 128 MB of the worker; the upload limit of 10 MB counts
+     * the file, and a PDF can unpack into far more text than that.
+     */
+    public const int MAX_TEXT_BYTES = 20_000_000;
+
+    /**
      * The queue keeps only the id of the document; workspace and path are read
      * from MySQL when the job runs, since there is no login in the background.
      */
@@ -104,11 +119,15 @@ class ExtractDocumentText implements ShouldQueue
             return;
         }
 
-        $pages = $texts->map(fn (string $text, int $index): array => ['page' => $index + 1, 'text' => $text]);
+        $pages = $texts->map(fn (string $text, int $index): array => [
+            'document_id' => $this->document->id,
+            'page' => $index + 1,
+            'text' => $text,
+        ]);
 
         DB::transaction(function () use ($pages): void {
             $this->document->pages()->delete();
-            $this->document->pages()->createMany($pages);
+            $pages->chunk(self::PAGES_PER_INSERT)->each(fn (Collection $bundle) => DocumentPage::insert($bundle->values()->all()));
         });
     }
 
@@ -140,8 +159,11 @@ class ExtractDocumentText implements ShouldQueue
      * The raw text of each page, in the order of the document. pdftotext ends every page
      * of a PDF with a form feed, also a page without text, so the pieces between them
      * are its pages. A Markdown file is one page. A missing file, or a PDF that needs a
-     * password or is damaged, is unreadable; any other error of pdftotext or of the disk
-     * is thrown to be retried.
+     * password, is damaged or gives more text than MAX_TEXT_BYTES, is unreadable; any
+     * other error of pdftotext or of the disk is thrown to be retried.
+     *
+     * pdftotext is killed as soon as its text passes the limit, so a PDF that unpacks
+     * into gigabytes costs a few seconds and no more memory than the limit.
      *
      * @return list<string>
      *
@@ -156,7 +178,24 @@ class ExtractDocumentText implements ShouldQueue
         }
 
         if ($this->document->format === DocumentFormat::Pdf) {
-            $result = Process::run(['pdftotext', '-enc', 'UTF-8', $disk->path($this->document->path), '-']);
+            $textBytes = 0;
+            $hasTooMuchText = false;
+            $process = Process::start(['pdftotext', '-enc', 'UTF-8', $disk->path($this->document->path), '-']);
+
+            $result = $process->wait(function (string $type, string $output) use ($process, &$textBytes, &$hasTooMuchText): void {
+                if ($type === 'out' && ! $hasTooMuchText) {
+                    $textBytes += strlen($output);
+
+                    if ($textBytes > self::MAX_TEXT_BYTES) {
+                        $hasTooMuchText = true;
+                        $process->signal(SIGKILL);
+                    }
+                }
+            });
+
+            if ($hasTooMuchText) {
+                throw UnreadableDocument::tooMuchText();
+            }
 
             if ($result->exitCode() === self::PDFTOTEXT_OPEN_ERROR) {
                 $needsPassword = str_contains($result->errorOutput(), 'Incorrect password');

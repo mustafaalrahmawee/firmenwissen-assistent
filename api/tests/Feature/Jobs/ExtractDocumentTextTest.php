@@ -5,8 +5,8 @@ use App\Enums\DocumentStatus;
 use App\Http\CurrentTenant;
 use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
-use App\Models\DocumentPage;
 use App\Models\User;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Process\Exceptions\ProcessFailedException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
@@ -142,7 +142,11 @@ describe('ExtractDocumentText', function () {
             ['page' => 1, 'text' => 'alter Text'],
             ['page' => 2, 'text' => 'alte zweite Seite'],
         ]);
-        DocumentPage::creating(fn () => throw new RuntimeException('Datenbank weg'));
+        DB::listen(function (QueryExecuted $query): void {
+            if (str_starts_with($query->sql, 'insert into "document_pages"')) {
+                throw new RuntimeException('Datenbank weg');
+            }
+        });
 
         expect(fn () => (new ExtractDocumentText($document))->handle())->toThrow(RuntimeException::class, 'Datenbank weg');
 
@@ -397,6 +401,54 @@ describe('ExtractDocumentText', function () {
             ->and(DB::table('jobs')->count())->toBe(0)
             ->and(DB::table('failed_jobs')->count())->toBe(0);
     });
+
+    it('keeps every page of a long PDF and writes them in bundles of one hundred', function () {
+        $document = documentWithFile(DocumentFormat::Pdf, file_get_contents(fixture('documents/handbuch-450-seiten.pdf')));
+        $inserts = 0;
+        DB::listen(function (QueryExecuted $query) use (&$inserts): void {
+            if (str_starts_with($query->sql, 'insert into "document_pages"')) {
+                $inserts++;
+            }
+        });
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect($document->pages()->count())->toBe(450)
+            ->and($document->pages()->orderBy('page')->pluck('page')->all())->toBe(range(1, 450))
+            ->and($document->pages()->where('page', 450)->value('text'))->toBe("Betriebshandbuch VPN, Seite 450\nAbschnitt 450: Zugang und Störungen.\n\n")
+            ->and($inserts)->toBe(5);
+    });
+
+    it('fails a PDF that unpacks into more text than a run can hold and stops pdftotext at the limit', function () {
+        Log::spy();
+        $bomb = compressionBomb(200);
+        $document = documentWithFile(DocumentFormat::Pdf, $bomb);
+        $path = Storage::disk('local')->path($document->path);
+        $job = (new ExtractDocumentText($document))->withFakeQueueInteractions();
+        $start = microtime(true);
+
+        $job->handle();
+
+        $seconds = microtime(true) - $start;
+        $runningForThisFile = collect(glob('/proc/[0-9]*/cmdline'))
+            ->filter(fn (string $file): bool => str_contains((string) @file_get_contents($file), $path));
+        $reason = 'Das PDF enthält mehr Text, als der Assistent verarbeiten kann. Bitte das Dokument in kleinere Teile aufteilen.';
+        $job->assertNotFailed()->assertNotReleased();
+        $stored = $document->fresh();
+        expect(strlen($bomb))->toBeLessThan(2_000_000)
+            ->and($seconds)->toBeLessThan(20)
+            ->and($stored->status)->toBe(DocumentStatus::Failed)
+            ->and($stored->failure_reason)->toBe($reason)
+            ->and($stored->pages()->count())->toBe(0)
+            ->and($runningForThisFile)->toBeEmpty();
+        Log::shouldHaveReceived('warning')
+            ->with('Dokument ist gescheitert.', ['document_id' => $document->id, 'reason' => $reason])
+            ->once();
+    });
+
+    it('allows twenty million bytes of plain text, which a run holds about three times inside the 128 MB of the worker', function () {
+        expect(ExtractDocumentText::MAX_TEXT_BYTES)->toBe(20_000_000);
+    });
 });
 
 /**
@@ -405,4 +457,40 @@ describe('ExtractDocumentText', function () {
 function workOneJob(): void
 {
     Artisan::call('queue:work', ['--once' => true, '--sleep' => 0]);
+}
+
+/**
+ * A small PDF whose compressed pages unpack into about this many megabytes of plain text:
+ * every page repeats the same line, so it shrinks to a fraction of a percent.
+ */
+function compressionBomb(int $megabytes): string
+{
+    $pageCount = intdiv($megabytes * 1000, 60) + 1;
+    $content = gzcompress("BT /F1 1 Tf 0 800 Td 1 TL\n".str_repeat('('.str_repeat('a', 1000).") Tj T*\n", 60).'ET', 9);
+    $fontId = 3 + 2 * $pageCount;
+    $kids = implode(' ', array_map(fn (int $index): string => (3 + 2 * $index).' 0 R', range(0, $pageCount - 1)));
+    $objects = ['<< /Type /Catalog /Pages 2 0 R >>', "<< /Type /Pages /Kids [{$kids}] /Count {$pageCount} >>"];
+
+    foreach (range(0, $pageCount - 1) as $index) {
+        $objects[] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 '.$fontId.' 0 R >> >> /Contents '.(4 + 2 * $index).' 0 R >>';
+        $objects[] = '<< /Length '.strlen($content)." /Filter /FlateDecode >>\nstream\n{$content}\nendstream";
+    }
+
+    $objects[] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+    $pdf = "%PDF-1.4\n";
+    $offsets = [];
+
+    foreach ($objects as $index => $object) {
+        $offsets[] = strlen($pdf);
+        $pdf .= ($index + 1)." 0 obj\n{$object}\nendobj\n";
+    }
+
+    $xref = strlen($pdf);
+    $pdf .= 'xref'."\n0 ".(count($objects) + 1)."\n0000000000 65535 f \n";
+
+    foreach ($offsets as $offset) {
+        $pdf .= sprintf("%010d 00000 n \n", $offset);
+    }
+
+    return $pdf.'trailer'."\n<< /Size ".(count($objects) + 1)." /Root 1 0 R >>\nstartxref\n{$xref}\n%%EOF\n";
 }
