@@ -113,8 +113,9 @@ class ExtractDocumentText implements ShouldQueue
     /**
      * The raw text of each page, in the order of the document. pdftotext ends every page
      * of a PDF with a form feed, also a page without text, so the pieces between them
-     * are its pages. A Markdown file is one page. A PDF that needs a password or is
-     * damaged is unreadable; any other error of pdftotext is thrown to be retried.
+     * are its pages. A Markdown file is one page. A missing file, or a PDF that needs a
+     * password or is damaged, is unreadable; any other error of pdftotext or of the disk
+     * is thrown to be retried.
      *
      * @return list<string>
      *
@@ -123,6 +124,10 @@ class ExtractDocumentText implements ShouldQueue
     private function readPages(): array
     {
         $disk = Storage::disk('local');
+
+        if (! $disk->exists($this->document->path)) {
+            throw UnreadableDocument::missingFile();
+        }
 
         if ($this->document->format === DocumentFormat::Pdf) {
             $result = Process::run(['pdftotext', '-enc', 'UTF-8', $disk->path($this->document->path), '-']);

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
+use League\Flysystem\UnableToReadFile;
 
 beforeEach(function () {
     Storage::fake('local');
@@ -282,5 +283,37 @@ describe('ExtractDocumentText', function () {
         expect($stored->status)->toBe(DocumentStatus::Processing)
             ->and($stored->failure_reason)->toBeNull()
             ->and($stored->pages()->pluck('text')->all())->toBe(['alter Text']);
+    });
+
+    it('fails a document whose file is missing at once with its own reason, not as empty or damaged', function (DocumentFormat $format) {
+        Log::spy();
+        $document = documentWithFile($format, '');
+        Storage::disk('local')->delete($document->path);
+        $job = (new ExtractDocumentText($document))->withFakeQueueInteractions();
+
+        $job->handle();
+
+        $job->assertNotFailed()->assertNotReleased();
+        $stored = $document->fresh();
+        expect($stored->status)->toBe(DocumentStatus::Failed)
+            ->and($stored->failure_reason)->toBe('Die Datei des Dokuments fehlt in der Ablage.')
+            ->and($stored->pages()->count())->toBe(0);
+        Log::shouldHaveReceived('warning')
+            ->with('Dokument ist gescheitert.', ['document_id' => $document->id, 'reason' => 'Die Datei des Dokuments fehlt in der Ablage.'])
+            ->once();
+    })->with([
+        'PDF' => [DocumentFormat::Pdf],
+        'Markdown' => [DocumentFormat::Markdown],
+    ]);
+
+    it('throws another error while reading the disk to be retried and does not fail the document', function () {
+        $document = documentWithFile(DocumentFormat::Markdown, "# Neue Laptops\n");
+        chmod(Storage::disk('local')->path($document->path), 0);
+
+        expect(fn () => (new ExtractDocumentText($document))->handle())->toThrow(UnableToReadFile::class);
+
+        $stored = $document->fresh();
+        expect($stored->status)->toBe(DocumentStatus::Processing)
+            ->and($stored->failure_reason)->toBeNull();
     });
 });

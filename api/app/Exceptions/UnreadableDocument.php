@@ -32,4 +32,12 @@ class UnreadableDocument extends Exception
     {
         return new self('Die Markdown-Datei ist leer.');
     }
+
+    /**
+     * No advice to upload again: the upload refuses the same content while the document exists.
+     */
+    public static function missingFile(): self
+    {
+        return new self('Die Datei des Dokuments fehlt in der Ablage.');
+    }
 }
