@@ -16,7 +16,9 @@ class DocumentResource extends JsonResource
      *
      * The place on the disk and the SHA-256 stay on the server.
      *
-     * @return array{id: string, name: string, format: string, size: int, created_at: mixed}
+     * The reason is set only for a failed document.
+     *
+     * @return array{id: string, name: string, format: string, size: int, status: string, failure_reason: ?string, created_at: mixed}
      */
     public function toArray(Request $request): array
     {
@@ -25,6 +27,8 @@ class DocumentResource extends JsonResource
             'name' => $this->name,
             'format' => $this->format->value,
             'size' => $this->size,
+            'status' => $this->status->value,
+            'failure_reason' => $this->failure_reason,
             'created_at' => $this->created_at,
         ];
     }

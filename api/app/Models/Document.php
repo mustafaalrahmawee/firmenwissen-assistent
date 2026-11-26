@@ -32,6 +32,15 @@ class Document extends Model
     private const string DISPLAY_TIMEZONE = 'Europe/Berlin';
 
     /**
+     * A new document is pending, also before it is read back from the database.
+     *
+     * @var array<string, string>
+     */
+    protected $attributes = [
+        'status' => DocumentStatus::Pending->value,
+    ];
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>

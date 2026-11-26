@@ -56,8 +56,10 @@ describe('POST /api/v1/documents', function () {
         $response->assertCreated()
             ->assertJsonPath('data.name', 'Betriebshandbuch VPN.pdf')
             ->assertJsonPath('data.format', 'pdf')
-            ->assertJsonPath('data.size', strlen(pdfBytes()));
-        expect(array_keys($response->json('data')))->toBe(['id', 'name', 'format', 'size', 'created_at']);
+            ->assertJsonPath('data.size', strlen(pdfBytes()))
+            ->assertJsonPath('data.status', 'pending')
+            ->assertJsonPath('data.failure_reason', null);
+        expect(array_keys($response->json('data')))->toBe(['id', 'name', 'format', 'size', 'status', 'failure_reason', 'created_at']);
 
         $document = Document::sole();
         expect($document->id)->toBe($response->json('data.id'))
@@ -500,5 +502,44 @@ describe('POST /api/v1/documents', function () {
 
         $this->travel(1)->days();
         $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')])->assertCreated();
+    });
+});
+
+describe('GET /api/v1/documents/{document}', function () {
+    it('returns a document of the workspace with its status and, once failed, its reason', function (DocumentStatus $status, ?string $reason) {
+        $jana = janaLoggedIn();
+        $document = Document::factory()->for($jana)->for($jana->tenant)->create([
+            'name' => 'Betriebshandbuch VPN.pdf',
+            'status' => $status,
+            'failure_reason' => $reason,
+        ]);
+
+        $response = $this->getJson(DOCUMENTS_URL.'/'.$document->id);
+
+        $response->assertOk()
+            ->assertJsonPath('data.id', $document->id)
+            ->assertJsonPath('data.name', 'Betriebshandbuch VPN.pdf')
+            ->assertJsonPath('data.status', $status->value)
+            ->assertJsonPath('data.failure_reason', $reason);
+        expect(array_keys($response->json('data')))->toBe(['id', 'name', 'format', 'size', 'status', 'failure_reason', 'created_at']);
+    })->with([
+        'wartet' => [DocumentStatus::Pending, null],
+        'in Arbeit' => [DocumentStatus::Processing, null],
+        'gescheitert' => [DocumentStatus::Failed, 'Das PDF enthält keinen lesbaren Text. Vielleicht ist es ein Scan.'],
+    ]);
+
+    it('returns the status the processing has set since the upload', function () {
+        janaLoggedIn();
+        $id = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')])->json('data.id');
+
+        Document::findOrFail($id)->forceFill(['status' => DocumentStatus::Processing])->save();
+
+        $this->getJson(DOCUMENTS_URL.'/'.$id)->assertOk()->assertJsonPath('data.status', 'processing');
+    });
+
+    it('returns 401 without a token', function () {
+        $document = Document::factory()->create();
+
+        $this->getJson(DOCUMENTS_URL.'/'.$document->id)->assertUnauthorized();
     });
 });

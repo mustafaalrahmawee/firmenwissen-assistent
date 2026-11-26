@@ -71,4 +71,13 @@ class DocumentController extends Controller
 
         return DocumentResource::make($document);
     }
+
+    /**
+     * Return one document of the current workspace with its processing status.
+     * The document is looked up only among the documents of the workspace.
+     */
+    public function show(CurrentTenant $currentTenant, string $document): DocumentResource
+    {
+        return DocumentResource::make($currentTenant->get()->documents()->findOrFail($document));
+    }
 }
