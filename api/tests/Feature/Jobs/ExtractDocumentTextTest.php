@@ -106,4 +106,60 @@ describe('Job ExtractDocumentText', function () {
 
         expect(storedPages($document))->toBe([1 => 'Inhaltsverzeichnis', 4 => 'Kapitel 1: Einwahl']);
     });
+
+    it('keeps the hyphen of a word split before a capital letter and removes only the line break', function () {
+        $document = documentWithPdf(pdfWithPages([
+            ['Bitte die E-', 'Mail-Adresse und das VPN-', 'Gateway eintragen.'],
+        ]));
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect(storedPages($document))->toBe([1 => 'Bitte die E-Mail-Adresse und das VPN-Gateway eintragen.']);
+    });
+
+    it('keeps the hyphen for a left-out part before a conjunction and puts a space for the line break', function () {
+        $document = documentWithPdf(pdfWithPages([
+            ['Alle Ein-', 'und Ausgänge, Vor-', 'oder Nachnamen, Montag-', 'bis Freitagsdienste'],
+        ]));
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect(storedPages($document))->toBe([1 => 'Alle Ein- und Ausgänge, Vor- oder Nachnamen, Montag- bis Freitagsdienste']);
+    });
+
+    it('keeps headers and footers on every page as they are in the PDF', function () {
+        $document = documentWithPdf(pdfWithPages([
+            ['Betriebshandbuch VPN · Nordlicht IT GmbH', 'Einleitung', 'Seite 1 von 2'],
+            ['Betriebshandbuch VPN · Nordlicht IT GmbH', 'Einwahl', 'Seite 2 von 2'],
+        ]));
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect(storedPages($document))->toBe([
+            1 => "Betriebshandbuch VPN · Nordlicht IT GmbH\nEinleitung\nSeite 1 von 2",
+            2 => "Betriebshandbuch VPN · Nordlicht IT GmbH\nEinwahl\nSeite 2 von 2",
+        ]);
+    });
+
+    it('leaves only gaps in the page numbers for several empty pages in a row', function () {
+        $document = documentWithPdf(pdfWithPages([['Deckblatt'], [], [], [], ['Kapitel 1']]));
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect(storedPages($document))->toBe([1 => 'Deckblatt', 5 => 'Kapitel 1']);
+    });
+
+    it('keeps each part of a paragraph across a page border on its own page', function () {
+        $document = documentWithPdf(pdfWithPages([
+            ['Kapitel 2', 'Die Einwahl erfolgt über'],
+            ['den Client des Herstellers.'],
+        ]));
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect(storedPages($document))->toBe([
+            1 => "Kapitel 2\nDie Einwahl erfolgt über",
+            2 => 'den Client des Herstellers.',
+        ]);
+    });
 });
