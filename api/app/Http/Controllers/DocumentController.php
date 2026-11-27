@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Http\CurrentTenant;
 use App\Http\Requests\StoreDocumentRequest;
 use App\Http\Resources\DocumentResource;
+use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -15,9 +17,11 @@ use Throwable;
 class DocumentController extends Controller
 {
     /**
-     * Store the file unchanged and record it as a document of the current workspace.
-     * If anything fails, the file is removed again. The same content twice in one workspace
-     * is stopped by the unique index. A name longer than 255 characters is shortened.
+     * Store the file unchanged and record it as a document of the current workspace. The document
+     * and the job that reads its text are saved together, so there is never one without the other;
+     * the upload does not wait for the job. If anything fails, the file is removed again. The same
+     * content twice in one workspace is stopped by the unique index. A name longer than 255
+     * characters is shortened.
      */
     public function store(StoreDocumentRequest $request, CurrentTenant $currentTenant): DocumentResource
     {
@@ -41,7 +45,10 @@ class DocumentController extends Controller
 
         try {
             $disk->putFileAs($directory, $file, $fileName);
-            $document->save();
+            DB::transaction(function () use ($document): void {
+                $document->save();
+                ExtractDocumentText::dispatch($document);
+            });
         } catch (Throwable $exception) {
             rescue(
                 fn () => $disk->delete($document->path),

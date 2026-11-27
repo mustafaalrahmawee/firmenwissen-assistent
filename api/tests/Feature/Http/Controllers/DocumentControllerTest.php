@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
 use App\Models\Tenant;
 use App\Models\User;
@@ -9,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -312,14 +314,14 @@ describe('POST /api/v1/documents', function () {
         $this->travelTo(new DateTimeImmutable('2026-11-23 13:05:00 UTC'));
         $jana = janaLoggedIn();
         $tobias = User::factory()->for($jana->tenant)->create(['name' => 'Tobias Kern']);
-        Document::creating(function (Document $document) use ($tobias): void {
-            DB::table('documents')->insert([
+        DB::beforeStartingTransaction(function () use ($jana, $tobias): void {
+            DB::table('documents')->insertOrIgnore([
                 'id' => strtolower((string) Str::ulid()),
-                'tenant_id' => $document->tenant_id,
+                'tenant_id' => $jana->tenant_id,
                 'user_id' => $tobias->id,
                 'name' => 'Betriebshandbuch VPN.pdf',
-                'size' => $document->size,
-                'sha256' => $document->sha256,
+                'size' => strlen(pdfBytes()),
+                'sha256' => hash('sha256', pdfBytes()),
                 'path' => 'documents/other.pdf',
                 'created_at' => now(),
                 'updated_at' => now(),
@@ -377,7 +379,7 @@ describe('POST /api/v1/documents', function () {
             ->once();
     });
 
-    it('accepts the upload without calling the services for processing and search', function () {
+    it('starts reading the text of the uploaded document without calling the services for embeddings and search', function () {
         Http::preventStrayRequests();
         Queue::fake();
         janaLoggedIn();
@@ -385,8 +387,49 @@ describe('POST /api/v1/documents', function () {
         $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
 
         $response->assertCreated();
-        Queue::assertNothingPushed();
+        Queue::assertPushedTimes(ExtractDocumentText::class, 1);
+        Queue::assertPushed(ExtractDocumentText::class, fn (ExtractDocumentText $job) => $job->document->is(Document::sole()));
     });
+
+    it('answers the upload before the text is read and leaves the job waiting in the queue', function () {
+        config(['queue.default' => 'database']);
+        janaLoggedIn();
+
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
+
+        $response->assertCreated();
+        $job = DB::table('jobs')->sole();
+        expect(json_decode($job->payload, true)['displayName'])->toBe(ExtractDocumentText::class)
+            ->and($job->payload)->toContain($response->json('data.id'))
+            ->and($job->attempts)->toBe(0);
+    });
+
+    it('saves no document and removes its file when the job cannot be queued', function () {
+        config(['queue.default' => 'database']);
+        Schema::drop('jobs');
+        janaLoggedIn();
+
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
+
+        $response->assertServerError();
+        $this->assertDatabaseEmpty('documents');
+        expect(Storage::disk('local')->allFiles())->toBeEmpty();
+    });
+
+    it('starts no job for an upload that is rejected', function (string $content) {
+        Queue::fake();
+        janaLoggedIn();
+        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Betriebshandbuch VPN.pdf', pdfBytes())])->assertCreated();
+        Queue::fake();
+
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Kopie.pdf', $content)]);
+
+        $response->assertUnprocessable();
+        Queue::assertNothingPushed();
+    })->with([
+        'same content' => [pdfBytes()],
+        'no PDF' => ["# Kein PDF\n"],
+    ]);
 
     it('returns 429 after thirty uploads within a minute from the same account', function () {
         janaLoggedIn();
