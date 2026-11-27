@@ -3,7 +3,7 @@
     <v-card class="pa-6">
       <h3 class="text-title-large font-weight-semibold">Dokumente hochladen</h3>
       <p class="text-body-medium text-muted mt-1">
-        PDF und Markdown (.pdf, .md, .markdown), höchstens 10 MB je Datei. Du kannst mehrere Dateien auf einmal
+        Nur PDF-Dateien (.pdf), höchstens 10 MB je Datei. Du kannst mehrere Dateien auf einmal
         auswählen; Dateinamen mit mehr als 255 Zeichen werden gekürzt. Danach werden die Dokumente verarbeitet und
         sind erst dann durchsuchbar.
       </p>
@@ -25,7 +25,7 @@
         ref="picker"
         type="file"
         multiple
-        accept=".pdf,.md,.markdown"
+        accept=".pdf"
         class="d-none"
         aria-label="Dateien zum Hochladen auswählen"
         @change="pick"
@@ -65,10 +65,8 @@ function notify(color: Message['color'], text: string) {
 // Lädt eine Datei hoch und meldet ihr Ergebnis; ein zurückgegebener Grund beendet die ganze Auswahl
 async function uploadFile(file: File): Promise<string | undefined> {
   // Prüft vorab, was sich ohne Server sagen lässt; verbindlich prüft der Server
-  const extension = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : ''
-  const isAllowedExtension = ['pdf', 'md', 'markdown'].includes(extension)
-  if (!isAllowedExtension) {
-    notify('error', `„${file.name}“: Erlaubt sind nur PDF- und Markdown-Dateien (.pdf, .md, .markdown).`)
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    notify('error', `„${file.name}“: Erlaubt sind nur PDF-Dateien (.pdf).`)
     return
   }
   if (file.size > 10 * 1024 * 1024) {

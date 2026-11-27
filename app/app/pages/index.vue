@@ -25,7 +25,7 @@ definePageMeta({
 })
 
 const FEATURES = [
-  { icon: FileUp, title: 'Dokumente', text: 'PDF und Markdown hochladen, Verarbeitung mit Status.' },
+  { icon: FileUp, title: 'Dokumente', text: 'PDF hochladen, Verarbeitung mit Status.' },
   { icon: MessageSquare, title: 'Chat', text: 'Fragen stellen, Antworten mit Quellen und Textstelle.' },
   { icon: Plug, title: 'MCP', text: 'Dasselbe Wissen in Claude, Cursor oder VS Code nutzen.' },
 ]

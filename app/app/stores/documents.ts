@@ -3,7 +3,6 @@ import { defineStore } from 'pinia'
 export interface UploadedDocument {
   id: string
   name: string
-  format: 'pdf' | 'markdown'
   size: number
   created_at: string
 }
