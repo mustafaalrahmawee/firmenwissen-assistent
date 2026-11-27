@@ -29,7 +29,7 @@ Portfolio-Projekt: Ein Multi-Tenant-Wissensassistent für IT-KMU. Teams laden Do
 - **Anmeldung und Arbeitsbereiche:** Login mit Sanctum, jeder Nutzer gehört zu genau einem Tenant, Daten sind strikt getrennt. Nutzer können sich mit E-Mail und Passwort selbst registrieren; für die Live-Demo gibt es zusätzlich einen fertigen Demo-Zugang.
 - **Dokumenten-Upload:** nur PDF. Verarbeitung (Text extrahieren, zerteilen, einbetten, indexieren) läuft über Queues mit sichtbarem Status.
 - **RAG-Chat:** Gestreamte Antworten mit Quellen und Sprung zur Textstelle.
-- **Advanced RAG:** Anfrage umschreiben, Hybrid-Suche, Reranking, Kontext erweitern (Details im Anchor unter `docs/anchor/rag`).
+- **Advanced RAG:** Anfrage umschreiben, Hybrid-Suche, Reranking, Kontext erweitern.
 - **MCP-Server:** Tools `search_knowledge`, `get_document`, `list_sources`, mit Token pro Nutzer.
 - **Auswertung:** Testset mit Fragen; Vergleich nur Vektor / Hybrid / Hybrid mit Reranking.
 - **Tests und CI:** Pest-Tests für die API, GitHub Actions.
@@ -71,8 +71,6 @@ KI-Client ──MCP────────> │ ────────> Weavi
 
 ## 4. RAG-Pipeline (Kurzfassung)
 
-Die ausführliche Beschreibung steht im Anchor (`docs/anchor/rag`).
-
 1. **Anfrage aufbereiten:** Folgefrage per LLM in eigenständige Suchanfrage umschreiben.
 2. **Stufe 1, Hybrid-Suche:** 30 bis 50 Kandidaten aus dem Tenant (BM25 plus Vektor).
 3. **Stufe 2, Reranking:** Cross-Encoder sortiert neu, die besten 5 bis 8 bleiben.
@@ -102,7 +100,6 @@ knowledge-rag/
 ├── web/                  # Nuxt
 ├── docker/               # Dockerfiles, Init-Skripte
 ├── docs/
-│   ├── anchor/           # Anchor-Dokumente (rag, mcp, ...)
 │   └── PROJEKT.md
 ├── eval/                 # Testfragen und Auswertungsskript
 ├── docker-compose.yml
