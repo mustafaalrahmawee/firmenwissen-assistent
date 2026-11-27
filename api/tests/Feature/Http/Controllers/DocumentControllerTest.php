@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\DocumentStatus;
 use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
 use App\Models\Tenant;
@@ -66,7 +67,9 @@ describe('POST /api/v1/documents', function () {
             ->and($document->user_id)->toBe($jana->id)
             ->and($document->created_at)->not->toBeNull()
             ->and($document->sha256)->toBe(hash('sha256', pdfBytes()))
-            ->and($document->path)->toBe("documents/{$jana->tenant_id}/{$document->id}.pdf");
+            ->and($document->path)->toBe("documents/{$jana->tenant_id}/{$document->id}.pdf")
+            ->and($document->status)->toBe(DocumentStatus::Pending)
+            ->and($document->failure_reason)->toBeNull();
         expect(Storage::disk('local')->get($document->path))->toBe(pdfBytes());
     });
 

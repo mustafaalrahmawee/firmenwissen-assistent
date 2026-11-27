@@ -10,7 +10,8 @@ return new class extends Migration
      * Run the migrations.
      *
      * A workspace holds each content only once: the unique index on workspace and
-     * SHA-256 also stops two uploads of the same file at the same moment.
+     * SHA-256 also stops two uploads of the same file at the same moment. A new document
+     * waits for its processing; "failure_reason" is set only when it failed.
      */
     public function up(): void
     {
@@ -22,6 +23,8 @@ return new class extends Migration
             $table->unsignedBigInteger('size');
             $table->char('sha256', 64);
             $table->string('path');
+            $table->string('status', 20)->default('pending');
+            $table->string('failure_reason')->nullable();
             $table->timestamps();
 
             $table->unique(['tenant_id', 'sha256']);

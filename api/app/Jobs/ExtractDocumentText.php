@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\DocumentStatus;
 use App\Models\Document;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -26,7 +27,8 @@ class ExtractDocumentText implements ShouldQueue
      * capital letter the hyphen belongs to the word ("E-Mail") and only the line break goes; before
      * a conjunction it stands for a left-out part ("Ein- und Ausgänge") and the break becomes a
      * space. Headers and footers stay as they are. Spaces and control characters alone are no
-     * text: a page needs a letter or a digit, otherwise it is left out.
+     * text: a page needs a letter or a digit, otherwise it is left out. A PDF without any page
+     * of text fails at once with its reason and ends the job, so the queue does not try it again.
      */
     public function handle(): void
     {
@@ -50,6 +52,14 @@ class ExtractDocumentText implements ShouldQueue
             ])
             ->filter(fn (array $page) => preg_match('/[\p{L}\p{N}]/u', $page['text']) === 1)
             ->values();
+
+        if ($pages->isEmpty()) {
+            $this->document->status = DocumentStatus::Failed;
+            $this->document->failure_reason = 'Das PDF enthält keinen lesbaren Text. Vermutlich ist es ein Scan.';
+            $this->document->save();
+
+            return;
+        }
 
         $this->document->pages()->createMany($pages->all());
     }

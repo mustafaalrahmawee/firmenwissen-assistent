@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\DocumentStatus;
 use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
 use Illuminate\Support\Facades\Storage;
@@ -161,5 +162,31 @@ describe('Job ExtractDocumentText', function () {
             1 => "Kapitel 2\nDie Einwahl erfolgt über",
             2 => 'den Client des Herstellers.',
         ]);
+    });
+
+    it('fails a PDF without any page of text with its reason and does not try it again', function () {
+        $pdf = pdfWithPages([[], ['   '], []]);
+        $document = documentWithPdf($pdf);
+        $job = (new ExtractDocumentText($document))->withFakeQueueInteractions();
+
+        $job->handle();
+
+        $job->assertNotReleased();
+        $job->assertNotFailed();
+        expect($document->fresh())
+            ->status->toBe(DocumentStatus::Failed)
+            ->failure_reason->toBe('Das PDF enthält keinen lesbaren Text. Vermutlich ist es ein Scan.')
+            ->and(storedPages($document))->toBe([])
+            ->and(Storage::disk('local')->get($document->path))->toBe($pdf);
+    });
+
+    it('sets no failure for a PDF with text', function () {
+        $document = documentWithPdf(pdfWithPages([['Betriebshandbuch VPN']]));
+
+        ExtractDocumentText::dispatchSync($document);
+
+        expect($document->fresh())
+            ->status->toBe(DocumentStatus::Pending)
+            ->failure_reason->toBeNull();
     });
 });
