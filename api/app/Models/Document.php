@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * An uploaded file of a workspace. The file lies unchanged on the local disk under "path";
@@ -45,6 +46,16 @@ class Document extends Model
     public function tenant(): BelongsTo
     {
         return $this->belongsTo(Tenant::class);
+    }
+
+    /**
+     * The pages of the PDF that have text, each with its page number in the PDF.
+     *
+     * @return HasMany<DocumentPage, $this>
+     */
+    public function pages(): HasMany
+    {
+        return $this->hasMany(DocumentPage::class);
     }
 
     /**

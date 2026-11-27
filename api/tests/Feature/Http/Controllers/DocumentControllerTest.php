@@ -46,6 +46,10 @@ function janaLoggedIn(): User
 }
 
 describe('POST /api/v1/documents', function () {
+    beforeEach(function () {
+        Queue::fake();
+    });
+
     it('stores a PDF unchanged as a document of the workspace of the uploader and returns it', function () {
         $jana = janaLoggedIn();
 
@@ -381,7 +385,6 @@ describe('POST /api/v1/documents', function () {
 
     it('starts reading the text of the uploaded document without calling the services for embeddings and search', function () {
         Http::preventStrayRequests();
-        Queue::fake();
         janaLoggedIn();
 
         $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
@@ -391,33 +394,7 @@ describe('POST /api/v1/documents', function () {
         Queue::assertPushed(ExtractDocumentText::class, fn (ExtractDocumentText $job) => $job->document->is(Document::sole()));
     });
 
-    it('answers the upload before the text is read and leaves the job waiting in the queue', function () {
-        config(['queue.default' => 'database']);
-        janaLoggedIn();
-
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
-
-        $response->assertCreated();
-        $job = DB::table('jobs')->sole();
-        expect(json_decode($job->payload, true)['displayName'])->toBe(ExtractDocumentText::class)
-            ->and($job->payload)->toContain($response->json('data.id'))
-            ->and($job->attempts)->toBe(0);
-    });
-
-    it('saves no document and removes its file when the job cannot be queued', function () {
-        config(['queue.default' => 'database']);
-        Schema::drop('jobs');
-        janaLoggedIn();
-
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
-
-        $response->assertServerError();
-        $this->assertDatabaseEmpty('documents');
-        expect(Storage::disk('local')->allFiles())->toBeEmpty();
-    });
-
     it('starts no job for an upload that is rejected', function (string $content) {
-        Queue::fake();
         janaLoggedIn();
         $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Betriebshandbuch VPN.pdf', pdfBytes())])->assertCreated();
         Queue::fake();
@@ -482,5 +459,34 @@ describe('POST /api/v1/documents', function () {
 
         $this->travel(1)->days();
         $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))])->assertCreated();
+    });
+});
+
+describe('POST /api/v1/documents with the queue in the database', function () {
+    beforeEach(function () {
+        config(['queue.default' => 'database']);
+    });
+
+    it('answers the upload before the text is read and leaves the job waiting in the queue', function () {
+        janaLoggedIn();
+
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
+
+        $response->assertCreated();
+        $job = DB::table('jobs')->sole();
+        expect(json_decode($job->payload, true)['displayName'])->toBe(ExtractDocumentText::class)
+            ->and($job->payload)->toContain($response->json('data.id'))
+            ->and($job->attempts)->toBe(0);
+    });
+
+    it('saves no document and removes its file when the job cannot be queued', function () {
+        Schema::drop('jobs');
+        janaLoggedIn();
+
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
+
+        $response->assertServerError();
+        $this->assertDatabaseEmpty('documents');
+        expect(Storage::disk('local')->allFiles())->toBeEmpty();
     });
 });
