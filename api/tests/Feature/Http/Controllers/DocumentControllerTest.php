@@ -1,15 +1,11 @@
 <?php
 
-use App\Enums\DocumentStatus;
-use App\Jobs\ExtractDocumentText;
 use App\Models\Document;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
@@ -24,7 +20,6 @@ const WRONG_FORMAT = 'Erlaubt sind nur PDF- und Markdown-Dateien (.pdf, .md, .ma
 
 beforeEach(function () {
     Storage::fake('local');
-    Queue::fake();
 });
 
 /**
@@ -57,10 +52,8 @@ describe('POST /api/v1/documents', function () {
         $response->assertCreated()
             ->assertJsonPath('data.name', 'Betriebshandbuch VPN.pdf')
             ->assertJsonPath('data.format', 'pdf')
-            ->assertJsonPath('data.size', strlen(pdfBytes()))
-            ->assertJsonPath('data.status', 'pending')
-            ->assertJsonPath('data.failure_reason', null);
-        expect(array_keys($response->json('data')))->toBe(['id', 'name', 'format', 'size', 'status', 'failure_reason', 'created_at']);
+            ->assertJsonPath('data.size', strlen(pdfBytes()));
+        expect(array_keys($response->json('data')))->toBe(['id', 'name', 'format', 'size', 'created_at']);
 
         $document = Document::sole();
         expect($document->id)->toBe($response->json('data.id'))
@@ -416,40 +409,15 @@ describe('POST /api/v1/documents', function () {
             ->once();
     });
 
-    it('accepts the upload without calling the services for processing and search and queues the processing of the saved document', function () {
+    it('accepts the upload without calling the services for processing and search', function () {
         Http::preventStrayRequests();
+        Queue::fake();
         janaLoggedIn();
 
         $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')]);
 
         $response->assertCreated();
-        $document = Document::sole();
-        expect($document->id)->toBe($response->json('data.id'))
-            ->and($document->status)->toBe(DocumentStatus::Pending)
-            ->and($document->pages()->count())->toBe(0);
-        Queue::assertPushed(ExtractDocumentText::class, 1);
-        Queue::assertPushed(ExtractDocumentText::class, fn (ExtractDocumentText $job) => $job->document->is($document));
-    });
-
-    it('queues nothing for a rejected upload', function () {
-        janaLoggedIn();
-
-        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Angebot.docx', 'Angebot')])->assertUnprocessable();
-
         Queue::assertNothingPushed();
-    });
-
-    it('accepts the upload and reports the error when the processing cannot be queued, the document stays pending', function () {
-        Exceptions::fake();
-        Queue::shouldReceive('connection')->andThrow(new RuntimeException('Warteschlange nicht erreichbar'));
-        janaLoggedIn();
-
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Angebot.md', '# Angebot')]);
-
-        $response->assertCreated();
-        expect(Document::sole()->status)->toBe(DocumentStatus::Pending);
-        Storage::disk('local')->assertExists(Document::sole()->path);
-        Exceptions::assertReported(fn (RuntimeException $exception) => $exception->getMessage() === 'Warteschlange nicht erreichbar');
     });
 
     it('returns 429 after thirty uploads within a minute from the same account', function () {
@@ -503,159 +471,5 @@ describe('POST /api/v1/documents', function () {
 
         $this->travel(1)->days();
         $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')])->assertCreated();
-    });
-});
-
-describe('GET /api/v1/documents/{document}', function () {
-    it('returns a document of the workspace with its status and, once failed, its reason', function (DocumentStatus $status, string $expectedStatus, ?string $reason) {
-        $jana = janaLoggedIn();
-        $document = Document::factory()->for($jana)->for($jana->tenant)->create([
-            'name' => 'Betriebshandbuch VPN.pdf',
-            'status' => $status,
-            'failure_reason' => $reason,
-        ]);
-
-        $response = $this->getJson(DOCUMENTS_URL.'/'.$document->id);
-
-        $response->assertOk()
-            ->assertJsonPath('data.id', $document->id)
-            ->assertJsonPath('data.name', 'Betriebshandbuch VPN.pdf')
-            ->assertJsonPath('data.status', $expectedStatus)
-            ->assertJsonPath('data.failure_reason', $reason);
-        expect(array_keys($response->json('data')))->toBe(['id', 'name', 'format', 'size', 'status', 'failure_reason', 'created_at']);
-    })->with([
-        'wartet' => [DocumentStatus::Pending, 'pending', null],
-        'in Arbeit' => [DocumentStatus::Processing, 'processing', null],
-        'gescheitert' => [DocumentStatus::Failed, 'failed', 'Das PDF enthält keinen lesbaren Text. Vielleicht ist es ein Scan.'],
-    ]);
-
-    it('returns the status the processing has set since the upload', function () {
-        janaLoggedIn();
-        $id = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')])->json('data.id');
-
-        Document::findOrFail($id)->forceFill(['status' => DocumentStatus::Processing])->save();
-
-        $this->getJson(DOCUMENTS_URL.'/'.$id)->assertOk()->assertJsonPath('data.status', 'processing');
-    });
-
-    it('returns 401 without a token', function () {
-        $document = Document::factory()->create();
-
-        $this->getJson(DOCUMENTS_URL.'/'.$document->id)->assertUnauthorized();
-    });
-
-    it('shows the status to every person of the workspace, not only the uploader', function () {
-        $jana = User::factory()->for(Tenant::factory()->state(['name' => 'Nordlicht IT GmbH']))->create(['name' => 'Jana Petrov']);
-        $tobias = User::factory()->for($jana->tenant)->create(['name' => 'Tobias Kern']);
-        $document = Document::factory()->for($jana)->for($jana->tenant)->create(['status' => DocumentStatus::Processing]);
-        Sanctum::actingAs($tobias);
-
-        $this->getJson(DOCUMENTS_URL.'/'.$document->id)
-            ->assertOk()
-            ->assertJsonPath('data.id', $document->id)
-            ->assertJsonPath('data.status', 'processing');
-    });
-
-    it('answers a document of another workspace exactly like one that does not exist', function () {
-        config(['app.debug' => false]);
-        $handbook = Document::factory()->create([
-            'name' => 'Betriebshandbuch VPN.pdf',
-            'status' => DocumentStatus::Failed,
-            'failure_reason' => 'Das PDF ist mit einem Kennwort geschützt.',
-        ]);
-        $unknownId = (string) Str::ulid();
-        Sanctum::actingAs(User::factory()->for(Tenant::factory()->state(['name' => 'Hafenkante Systemhaus GmbH']))->create(['name' => 'Mehmet Aydin']));
-
-        $foreign = $this->getJson(DOCUMENTS_URL.'/'.$handbook->id);
-        $unknown = $this->getJson(DOCUMENTS_URL.'/'.$unknownId);
-
-        $foreign->assertNotFound();
-        $unknown->assertNotFound();
-        expect(str_replace($handbook->id, '{id}', $foreign->getContent()))
-            ->toBe(str_replace($unknownId, '{id}', $unknown->getContent()))
-            ->not->toContain('Betriebshandbuch')
-            ->not->toContain('Kennwort');
-    });
-
-    it('answers 404 for a document of another workspace even when the request names that workspace', function (string $place) {
-        $jana = User::factory()->for(Tenant::factory()->state(['name' => 'Nordlicht IT GmbH']))->create(['name' => 'Jana Petrov']);
-        $handbook = Document::factory()->for($jana)->for($jana->tenant)->create(['name' => 'Betriebshandbuch VPN.pdf']);
-        Sanctum::actingAs(User::factory()->for(Tenant::factory()->state(['name' => 'Hafenkante Systemhaus GmbH']))->create(['name' => 'Mehmet Aydin']));
-        $url = DOCUMENTS_URL.'/'.$handbook->id;
-
-        $response = match ($place) {
-            'body' => $this->json('GET', $url, ['tenant_id' => $jana->tenant_id]),
-            'query' => $this->getJson($url.'?tenant_id='.$jana->tenant_id),
-            'header' => $this->withHeader('X-Tenant-Id', $jana->tenant_id)->getJson($url),
-        };
-
-        $response->assertNotFound();
-        expect($response->getContent())->not->toContain('Betriebshandbuch');
-    })->with(['body', 'query', 'header']);
-
-    it('answers 404 and no server error for an id that is no document id', function (string $id) {
-        janaLoggedIn();
-
-        $this->getJson(DOCUMENTS_URL.'/'.rawurlencode($id))->assertNotFound();
-    })->with([
-        'zu kurz' => ['abc'],
-        'zu lang' => [str_repeat('0', 300)],
-        'Sonderzeichen' => ["01j'; DROP TABLE documents; --"],
-        'Pfad' => ['../../etc/passwd'],
-        'Großbuchstaben' => ['01JZZZZZZZZZZZZZZZZZZZZZZZ'],
-    ]);
-
-    it('keeps a document pending while nothing works off the queue, and its processing stays queued', function () {
-        janaLoggedIn();
-        $id = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen Laptops.md', '# Neue Laptops')])->json('data.id');
-
-        $this->travel(1)->hour();
-
-        $this->getJson(DOCUMENTS_URL.'/'.$id)
-            ->assertOk()
-            ->assertJsonPath('data.status', 'pending')
-            ->assertJsonPath('data.failure_reason', null);
-        Queue::assertPushed(ExtractDocumentText::class, fn (ExtractDocumentText $job) => $job->document->id === $id);
-    });
-
-    it('processes a document to the end after its uploader logged out and shows the new status after the next login', function () {
-        $jana = User::factory()->for(Tenant::factory()->state(['name' => 'Nordlicht IT GmbH']))->create(['name' => 'Jana Petrov']);
-        $morningToken = $jana->createToken('web')->plainTextToken;
-        $id = $this->withToken($morningToken)
-            ->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen Laptops.md', "# Neue Laptops\n\nAlle Geräte bekommen 32 GB RAM.")])
-            ->assertCreated()
-            ->json('data.id');
-        $this->withToken($morningToken)->postJson('/api/v1/logout')->assertNoContent();
-        Auth::forgetGuards();
-        expect(Auth::guard('sanctum')->user())->toBeNull();
-
-        Queue::pushed(ExtractDocumentText::class)->sole()->handle();
-
-        Auth::forgetGuards();
-        $this->withToken($morningToken)->getJson(DOCUMENTS_URL.'/'.$id)->assertUnauthorized();
-        expect(Document::findOrFail($id)->pages()->count())->toBe(1);
-
-        Auth::forgetGuards();
-        $this->withToken($jana->createToken('web')->plainTextToken)
-            ->getJson(DOCUMENTS_URL.'/'.$id)
-            ->assertOk()
-            ->assertJsonPath('data.status', 'processing');
-    });
-
-    it('answers an own id with trailing spaces like an unknown one, without looking it up', function () {
-        config(['app.debug' => false]);
-        $jana = janaLoggedIn();
-        $document = Document::factory()->for($jana)->for($jana->tenant)->create(['name' => 'Notizen Laptops.md']);
-        $unknownId = (string) Str::ulid();
-        $unknown = $this->getJson(DOCUMENTS_URL.'/'.$unknownId);
-        DB::enableQueryLog();
-
-        $padded = $this->getJson(DOCUMENTS_URL.'/'.rawurlencode($document->id.' '));
-
-        $padded->assertNotFound();
-        expect(str_replace(rawurlencode($document->id.' '), '{id}', str_replace($document->id.' ', '{id}', $padded->getContent())))
-            ->toBe(str_replace($unknownId, '{id}', $unknown->getContent()))
-            ->not->toContain('Notizen');
-        expect(collect(DB::getQueryLog())->pluck('query')->filter(fn (string $query) => str_contains($query, '"documents"')))->toBeEmpty();
     });
 });

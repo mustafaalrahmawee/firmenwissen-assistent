@@ -14,6 +14,5 @@ Route::prefix('v1')->name('v1.')->group(function () {
         Route::post('logout', [AuthController::class, 'logout'])->name('logout');
 
         Route::post('documents', [DocumentController::class, 'store'])->middleware(ThrottleEveryRequest::class.':documents')->name('documents.store');
-        Route::get('documents/{document}', [DocumentController::class, 'show'])->name('documents.show');
     });
 });

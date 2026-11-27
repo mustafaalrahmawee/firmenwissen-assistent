@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Enums\DocumentFormat;
-use App\Enums\DocumentStatus;
 use Database\Factories\DocumentFactory;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -12,12 +11,10 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * An uploaded file of a workspace. The file lies unchanged on the local disk under "path";
  * workspace and uploader are set only through their relations, never by mass assignment.
- * The status starts as pending and is moved only by the processing.
  */
 #[Fillable(['name', 'format', 'size', 'sha256', 'path'])]
 #[Hidden(['sha256', 'path'])]
@@ -32,15 +29,6 @@ class Document extends Model
     private const string DISPLAY_TIMEZONE = 'Europe/Berlin';
 
     /**
-     * A new document is pending, also before it is read back from the database.
-     *
-     * @var array<string, string>
-     */
-    protected $attributes = [
-        'status' => DocumentStatus::Pending->value,
-    ];
-
-    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -50,7 +38,6 @@ class Document extends Model
         return [
             'format' => DocumentFormat::class,
             'size' => 'integer',
-            'status' => DocumentStatus::class,
         ];
     }
 
@@ -70,16 +57,6 @@ class Document extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
-    }
-
-    /**
-     * The text of the document, page by page.
-     *
-     * @return HasMany<DocumentPage, $this>
-     */
-    public function pages(): HasMany
-    {
-        return $this->hasMany(DocumentPage::class);
     }
 
     /**

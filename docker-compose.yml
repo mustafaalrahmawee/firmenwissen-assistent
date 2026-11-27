@@ -81,10 +81,10 @@ services:
       test: ["CMD", "curl", "-fs", "http://localhost:8000/up"]
       interval: 10s
       retries: 5
-    depends_on:             # Hochladen und Lesen brauchen nur MySQL; Weaviate und Ollama dürfen fehlen
+    depends_on:
       mysql: { condition: service_healthy }
-      weaviate: { condition: service_started }
-      ollama: { condition: service_started }
+      weaviate: { condition: service_healthy }
+      ollama: { condition: service_healthy }
 
   worker:
     image: firmenwissen-assistent/api
