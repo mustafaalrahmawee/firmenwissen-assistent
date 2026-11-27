@@ -16,14 +16,13 @@ class DocumentResource extends JsonResource
      *
      * The place on the disk and the SHA-256 stay on the server.
      *
-     * @return array{id: string, name: string, format: string, size: int, created_at: mixed}
+     * @return array{id: string, name: string, size: int, created_at: mixed}
      */
     public function toArray(Request $request): array
     {
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'format' => $this->format->value,
             'size' => $this->size,
             'created_at' => $this->created_at,
         ];

@@ -19,7 +19,6 @@ return new class extends Migration
             $table->foreignUlid('tenant_id')->constrained()->restrictOnDelete();
             $table->foreignId('user_id')->constrained()->restrictOnDelete();
             $table->string('name');
-            $table->string('format', 16);
             $table->unsignedBigInteger('size');
             $table->char('sha256', 64);
             $table->string('path');

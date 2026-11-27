@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Enums\DocumentFormat;
 use Database\Factories\DocumentFactory;
 use Illuminate\Contracts\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -16,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * An uploaded file of a workspace. The file lies unchanged on the local disk under "path";
  * workspace and uploader are set only through their relations, never by mass assignment.
  */
-#[Fillable(['name', 'format', 'size', 'sha256', 'path'])]
+#[Fillable(['name', 'size', 'sha256', 'path'])]
 #[Hidden(['sha256', 'path'])]
 class Document extends Model
 {
@@ -36,7 +35,6 @@ class Document extends Model
     protected function casts(): array
     {
         return [
-            'format' => DocumentFormat::class,
             'size' => 'integer',
         ];
     }

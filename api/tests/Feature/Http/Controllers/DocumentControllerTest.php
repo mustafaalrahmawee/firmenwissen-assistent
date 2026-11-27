@@ -16,7 +16,7 @@ use League\Flysystem\UnableToDeleteFile;
 use League\Flysystem\UnableToWriteFile;
 
 const DOCUMENTS_URL = '/api/v1/documents';
-const WRONG_FORMAT = 'Erlaubt sind nur PDF- und Markdown-Dateien (.pdf, .md, .markdown).';
+const WRONG_FORMAT = 'Erlaubt sind nur PDF-Dateien (.pdf).';
 
 beforeEach(function () {
     Storage::fake('local');
@@ -51,9 +51,8 @@ describe('POST /api/v1/documents', function () {
 
         $response->assertCreated()
             ->assertJsonPath('data.name', 'Betriebshandbuch VPN.pdf')
-            ->assertJsonPath('data.format', 'pdf')
             ->assertJsonPath('data.size', strlen(pdfBytes()));
-        expect(array_keys($response->json('data')))->toBe(['id', 'name', 'format', 'size', 'created_at']);
+        expect(array_keys($response->json('data')))->toBe(['id', 'name', 'size', 'created_at']);
 
         $document = Document::sole();
         expect($document->id)->toBe($response->json('data.id'))
@@ -65,35 +64,30 @@ describe('POST /api/v1/documents', function () {
         expect(Storage::disk('local')->get($document->path))->toBe(pdfBytes());
     });
 
-    it('accepts Markdown and PDF files with their extension in any capitals', function (string $name, string $content, string $format, string $storedExtension) {
+    it('accepts a PDF with its extension in any capitals and stores it as .pdf', function (string $name) {
         $jana = janaLoggedIn();
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($name, $content)]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($name, pdfBytes())]);
 
-        $response->assertCreated()->assertJsonPath('data.format', $format);
+        $response->assertCreated();
         $document = Document::sole();
-        expect($document->path)->toBe("documents/{$jana->tenant_id}/{$document->id}.{$storedExtension}")
-            ->and(Storage::disk('local')->get($document->path))->toBe($content);
-    })->with([
-        '.md' => ['Laptop einrichten.md', "# Laptop einrichten\n\n- BitLocker aktivieren\n", 'markdown', 'md'],
-        '.MD' => ['LAPTOP.MD', "# Laptop\n", 'markdown', 'md'],
-        '.markdown' => ['Laptop einrichten.markdown', "# Laptop einrichten\n", 'markdown', 'md'],
-        '.PDF' => ['Betriebshandbuch.PDF', pdfBytes(), 'pdf', 'pdf'],
-    ]);
+        expect($document->path)->toBe("documents/{$jana->tenant_id}/{$document->id}.pdf")
+            ->and(Storage::disk('local')->get($document->path))->toBe(pdfBytes());
+    })->with(['Betriebshandbuch.PDF', 'Betriebshandbuch.Pdf']);
 
     it('lets every person of the workspace upload', function () {
         $jana = janaLoggedIn();
         $tobias = User::factory()->for($jana->tenant)->create(['name' => 'Tobias Kern']);
         Sanctum::actingAs($tobias);
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
 
         $response->assertCreated();
         expect(Document::sole())->tenant_id->toBe($jana->tenant_id)->user_id->toBe($tobias->id);
     });
 
     it('returns 401 without a token', function () {
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
 
         $response->assertUnauthorized();
         $this->assertDatabaseEmpty('documents');
@@ -104,7 +98,7 @@ describe('POST /api/v1/documents', function () {
         $nordlicht = Tenant::factory()->create(['name' => 'Nordlicht IT GmbH']);
         $mehmet = User::factory()->for(Tenant::factory()->state(['name' => 'Hafenkante Systemhaus GmbH']))->create();
         Sanctum::actingAs($mehmet);
-        $file = UploadedFile::fake()->createWithContent('Angebot.md', '# Angebot');
+        $file = UploadedFile::fake()->createWithContent('Angebot.pdf', pdfBytes('Angebot'));
 
         $response = match ($place) {
             'body' => $this->postJson(DOCUMENTS_URL, ['file' => $file, 'tenant_id' => $nordlicht->id]),
@@ -137,7 +131,7 @@ describe('POST /api/v1/documents', function () {
         $response->assertUnprocessable()->assertJsonValidationErrors(['file' => WRONG_FORMAT]);
         $this->assertDatabaseEmpty('documents');
         expect(Storage::disk('local')->allFiles())->toBeEmpty();
-    })->with(['Angebot.docx', 'Foto.png', 'Archiv.zip', 'skript.php', 'ohne-endung', 'Handbuch.pdf.exe']);
+    })->with(['Angebot.docx', 'Notizen.md', 'Notizen.markdown', 'Notizen.txt', 'Foto.png', 'Archiv.zip', 'skript.php', 'ohne-endung', 'Handbuch.pdf.exe']);
 
     it('returns 422 for a file ending in .pdf whose content is no PDF', function (string $content) {
         janaLoggedIn();
@@ -152,31 +146,15 @@ describe('POST /api/v1/documents', function () {
         'text' => ["# Kein PDF\n"],
     ]);
 
-    it('returns 422 for a file ending in .md or .markdown that is no UTF-8 text', function (string $name, string $content) {
+    it('returns 422 for a PDF whose name does not end in .pdf', function (string $name) {
         janaLoggedIn();
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($name, $content)]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($name, pdfBytes())]);
 
-        $response->assertUnprocessable()->assertJsonValidationErrors(['file' => 'Die Datei enthält keinen Text in UTF-8.']);
+        $response->assertUnprocessable()->assertJsonValidationErrors(['file' => WRONG_FORMAT]);
         $this->assertDatabaseEmpty('documents');
-    })->with([
-        'image renamed' => ['Notizen.md', "\x89PNG\r\n\x1A\n\x00\x00\x00\rIHDR\xFF\xFE"],
-        'Latin-1' => ['Notizen.md', "Gr\xF6\xDFe"],
-        'null character' => ['Notizen.markdown', "# Notizen\0"],
-    ]);
-
-    it('returns 422 for a PDF that ends in .md or .markdown, also one of plain ASCII text', function (string $name, ?string $content = null) {
-        janaLoggedIn();
-
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($name, $content ?? pdfBytes())]);
-
-        $response->assertUnprocessable()->assertJsonValidationErrors(['file' => 'Die Datei ist ein PDF, endet aber nicht auf .pdf.']);
-        $this->assertDatabaseEmpty('documents');
-    })->with([
-        '.md' => ['Betriebshandbuch.md'],
-        '.markdown' => ['Betriebshandbuch.markdown'],
-        'binary PDF' => ['Betriebshandbuch.md', "%PDF-1.4\n\xE2\xE3\xCF\xD3\n\xFF\xFE"],
-    ]);
+        expect(Storage::disk('local')->allFiles())->toBeEmpty();
+    })->with(['Betriebshandbuch.md', 'Betriebshandbuch.markdown', 'Betriebshandbuch']);
 
     it('returns 422 in German for a file that arrived only in part', function () {
         janaLoggedIn();
@@ -190,14 +168,6 @@ describe('POST /api/v1/documents', function () {
             ->assertJsonValidationErrors(['file' => 'Die Datei ließ sich nicht hochladen. Bitte versuche es erneut.']);
         $this->assertDatabaseEmpty('documents');
         expect(Storage::disk('local')->allFiles())->toBeEmpty();
-    });
-
-    it('accepts an empty Markdown file', function () {
-        janaLoggedIn();
-
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Leer.md', '')]);
-
-        $response->assertCreated()->assertJsonPath('data.size', 0);
     });
 
     it('returns 422 for an empty file ending in .pdf', function () {
@@ -238,9 +208,9 @@ describe('POST /api/v1/documents', function () {
 
     it('keeps the file name with umlauts and special characters', function () {
         janaLoggedIn();
-        $name = 'Übergabe & Größe (v2) – Entwurf #1.md';
+        $name = 'Übergabe & Größe (v2) – Entwurf #1.pdf';
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($name, '# Übergabe')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($name, pdfBytes())]);
 
         $response->assertCreated()->assertJsonPath('data.name', $name);
         expect(Document::sole()->name)->toBe($name);
@@ -249,27 +219,26 @@ describe('POST /api/v1/documents', function () {
     it('drops path parts of the file name and stores the file only under a name of its own', function (string $name, string $storedName) {
         $jana = janaLoggedIn();
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($name, '# Inhalt')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($name, pdfBytes())]);
 
         $response->assertCreated()->assertJsonPath('data.name', $storedName);
         $document = Document::sole();
-        expect(Storage::disk('local')->allFiles())->toBe(["documents/{$jana->tenant_id}/{$document->id}.md"]);
+        expect(Storage::disk('local')->allFiles())->toBe(["documents/{$jana->tenant_id}/{$document->id}.pdf"]);
     })->with([
-        'parent folders' => ['../../.env.md', '.env.md'],
-        'backslashes' => ['..\\..\\public\\index.md', 'index.md'],
-        'absolute path' => ['/etc/passwd.md', 'passwd.md'],
+        'parent folders' => ['../../.env.pdf', '.env.pdf'],
+        'backslashes' => ['..\\..\\public\\index.pdf', 'index.pdf'],
+        'absolute path' => ['/etc/passwd.pdf', 'passwd.pdf'],
     ]);
 
     it('shortens a file name longer than 255 characters to its first 255 and keeps one of 255', function () {
         janaLoggedIn();
-        $tooLong = str_repeat('ä', 253).'.md';
-        $longest = str_repeat('ä', 252).'.md';
+        $tooLong = str_repeat('ä', 252).'.pdf';
+        $longest = str_repeat('ä', 251).'.pdf';
 
-        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($tooLong, '# A')])
+        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($tooLong, pdfBytes('A'))])
             ->assertCreated()
-            ->assertJsonPath('data.name', mb_substr($tooLong, 0, 255))
-            ->assertJsonPath('data.format', 'markdown');
-        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($longest, '# B')])
+            ->assertJsonPath('data.name', mb_substr($tooLong, 0, 255));
+        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent($longest, pdfBytes('B'))])
             ->assertCreated()
             ->assertJsonPath('data.name', $longest);
     });
@@ -277,9 +246,9 @@ describe('POST /api/v1/documents', function () {
     it('replaces invalid characters in the file name instead of failing', function () {
         janaLoggedIn();
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent("Gr\xF6\xDFe.md", '# Größe')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent("Gr\xF6\xDFe.pdf", pdfBytes())]);
 
-        $response->assertCreated()->assertJsonPath('data.name', 'Gr??e.md');
+        $response->assertCreated()->assertJsonPath('data.name', 'Gr??e.pdf');
     });
 
     it('keeps two different files with the same name as two documents', function () {
@@ -349,7 +318,6 @@ describe('POST /api/v1/documents', function () {
                 'tenant_id' => $document->tenant_id,
                 'user_id' => $tobias->id,
                 'name' => 'Betriebshandbuch VPN.pdf',
-                'format' => 'pdf',
                 'size' => $document->size,
                 'sha256' => $document->sha256,
                 'path' => 'documents/other.pdf',
@@ -371,7 +339,7 @@ describe('POST /api/v1/documents', function () {
         janaLoggedIn();
         Document::creating(fn () => throw new RuntimeException('Datenbank weg'));
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
 
         $response->assertServerError();
         $this->assertDatabaseEmpty('documents');
@@ -384,11 +352,11 @@ describe('POST /api/v1/documents', function () {
         $disk->shouldReceive('putFileAs')->once()->andThrow(UnableToWriteFile::atLocation('documents', 'Ablage voll'));
         $disk->shouldReceive('delete')
             ->once()
-            ->with(Mockery::on(fn (string $path) => preg_match("#^documents/{$jana->tenant_id}/[0-9a-z]{26}\\.md$#", $path) === 1))
+            ->with(Mockery::on(fn (string $path) => preg_match("#^documents/{$jana->tenant_id}/[0-9a-z]{26}\\.pdf$#", $path) === 1))
             ->andReturn(true);
         Storage::shouldReceive('disk')->with('local')->andReturn($disk);
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
 
         $response->assertServerError();
         $this->assertDatabaseEmpty('documents');
@@ -402,7 +370,7 @@ describe('POST /api/v1/documents', function () {
         Storage::shouldReceive('disk')->with('local')->andReturn($disk);
         Log::spy();
 
-        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')])->assertServerError();
+        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))])->assertServerError();
 
         Log::shouldHaveReceived('warning')
             ->with('Datei ohne Dokument blieb in der Ablage liegen.', Mockery::on(fn (array $context) => str_starts_with($context['path'], 'documents/')))
@@ -414,7 +382,7 @@ describe('POST /api/v1/documents', function () {
         Queue::fake();
         janaLoggedIn();
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
 
         $response->assertCreated();
         Queue::assertNothingPushed();
@@ -423,10 +391,10 @@ describe('POST /api/v1/documents', function () {
     it('returns 429 after thirty uploads within a minute from the same account', function () {
         janaLoggedIn();
         foreach (range(1, 30) as $attempt) {
-            $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent("Notiz {$attempt}.md", "# Notiz {$attempt}")])->assertCreated();
+            $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent("Notiz {$attempt}.pdf", pdfBytes("Notiz {$attempt}"))])->assertCreated();
         }
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notiz 31.md', '# Notiz 31')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notiz 31.pdf', pdfBytes('Notiz 31'))]);
 
         $response->assertTooManyRequests()->assertHeader('Retry-After');
         expect(Document::count())->toBe(30);
@@ -438,7 +406,7 @@ describe('POST /api/v1/documents', function () {
             $this->postJson(DOCUMENTS_URL, [])->assertUnprocessable();
         }
 
-        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')])->assertTooManyRequests();
+        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))])->assertTooManyRequests();
         $this->assertDatabaseEmpty('documents');
     });
 
@@ -449,7 +417,7 @@ describe('POST /api/v1/documents', function () {
         }
         Sanctum::actingAs(User::factory()->for($jana->tenant)->create());
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
 
         $response->assertCreated();
     });
@@ -463,13 +431,13 @@ describe('POST /api/v1/documents', function () {
             $this->travel(61)->seconds();
         }
 
-        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')]);
+        $response = $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))]);
 
         $response->assertTooManyRequests();
         expect((int) $response->headers->get('Retry-After'))->toBeGreaterThan(60);
         $this->assertDatabaseEmpty('documents');
 
         $this->travel(1)->days();
-        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.md', '# Notizen')])->assertCreated();
+        $this->postJson(DOCUMENTS_URL, ['file' => UploadedFile::fake()->createWithContent('Notizen.pdf', pdfBytes('Notizen'))])->assertCreated();
     });
 });

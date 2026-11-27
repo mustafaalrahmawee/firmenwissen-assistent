@@ -2,7 +2,6 @@
 
 namespace App\Http\Requests;
 
-use App\Enums\DocumentFormat;
 use Closure;
 use finfo;
 use Illuminate\Contracts\Validation\ValidationRule;
@@ -36,9 +35,9 @@ class StoreDocumentRequest extends FormRequest
                 'bail',
                 'required',
                 'file',
-                'extensions:pdf,md,markdown',
+                'extensions:pdf',
                 'max:'.(config('documents.max_size_mb') * 1024),
-                $this->contentMatchesExtension(...),
+                $this->contentIsPdf(...),
             ],
         ];
     }
@@ -54,39 +53,18 @@ class StoreDocumentRequest extends FormRequest
             'file.required' => 'Bitte wähle eine Datei aus.',
             'file.file' => 'Die Datei ließ sich nicht hochladen. Bitte versuche es erneut.',
             'file.uploaded' => 'Die Datei ließ sich nicht hochladen. Bitte versuche es erneut.',
-            'file.extensions' => 'Erlaubt sind nur PDF- und Markdown-Dateien (.pdf, .md, .markdown).',
+            'file.extensions' => 'Erlaubt sind nur PDF-Dateien (.pdf).',
             'file.max' => 'Die Datei ist zu groß. Erlaubt sind höchstens '.config('documents.max_size_mb').' MB.',
         ];
     }
 
     /**
-     * The type the browser names is not trusted: a PDF must be recognised as PDF by its bytes.
-     * Markdown has no mark of its own: it must be UTF-8 text without null characters and must
-     * not be recognised as PDF, since a PDF can consist of ASCII text only.
+     * The type the browser names is not trusted: the file must be recognised as PDF by its bytes.
      */
-    private function contentMatchesExtension(string $attribute, UploadedFile $file, Closure $fail): void
+    private function contentIsPdf(string $attribute, UploadedFile $file, Closure $fail): void
     {
-        $path = $file->getRealPath();
-        $isPdf = (new finfo(FILEINFO_MIME_TYPE))->file($path) === 'application/pdf';
-
-        if (DocumentFormat::fromExtension($file->getClientOriginalExtension()) === DocumentFormat::Pdf) {
-            if (! $isPdf) {
-                $fail('Die Datei endet auf .pdf, ist aber kein PDF.');
-            }
-
-            return;
-        }
-
-        if ($isPdf) {
-            $fail('Die Datei ist ein PDF, endet aber nicht auf .pdf.');
-
-            return;
-        }
-
-        $content = file_get_contents($path);
-
-        if (! mb_check_encoding($content, 'UTF-8') || str_contains($content, "\0")) {
-            $fail('Die Datei enthält keinen Text in UTF-8.');
+        if ((new finfo(FILEINFO_MIME_TYPE))->file($file->getRealPath()) !== 'application/pdf') {
+            $fail('Die Datei endet auf .pdf, ist aber kein PDF.');
         }
     }
 }

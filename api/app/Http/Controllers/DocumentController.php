@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\DocumentFormat;
 use App\Http\CurrentTenant;
 use App\Http\Requests\StoreDocumentRequest;
 use App\Http\Resources\DocumentResource;
@@ -29,7 +28,6 @@ class DocumentController extends Controller
 
         $document = new Document([
             'name' => mb_substr(mb_scrub($file->getClientOriginalName(), 'UTF-8'), 0, 255),
-            'format' => DocumentFormat::fromExtension($file->getClientOriginalExtension()),
             'size' => $file->getSize(),
             'sha256' => hash_file('sha256', $file->getRealPath()),
         ]);
@@ -38,7 +36,7 @@ class DocumentController extends Controller
         $document->user()->associate($user);
 
         $directory = 'documents/'.$tenant->id;
-        $fileName = $document->id.'.'.$document->format->extension();
+        $fileName = $document->id.'.pdf';
         $document->path = $directory.'/'.$fileName;
 
         try {
